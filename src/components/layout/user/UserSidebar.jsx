@@ -21,7 +21,7 @@ export default function UserSidebar({ activePage, onNavigate, collapsed, onToggl
     const checkNew = async () => {
       const lastSeen = localStorage.getItem('lastVisitedCommunityVerification');
       try {
-        const res = await fetch(`http://localhost:5000/api/incident-reports/new-count${lastSeen ? `?since=${lastSeen}` : ''}`);
+        const res = await fetch(`https://sftr-api.onrender.com/api/incident-reports/new-count${lastSeen ? `?since=${lastSeen}` : ''}`);
         const data = await res.json();
         if (data.success) setNewReportsCount(data.count);
       } catch (err) {

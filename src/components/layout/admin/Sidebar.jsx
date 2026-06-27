@@ -51,7 +51,7 @@ export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCol
   const [pendingReports, setPendingReports] = useState(0);
 
   useEffect(() => {
-    fetch('http://localhost:5000/api/incident-reports')
+    fetch('https://sftr-api.onrender.com/api/incident-reports')
       .then(res => res.json())
       .then(data => {
         if (data.success) {

@@ -66,8 +66,8 @@ export default function WeatherBanner() {
       let queryStr = cityQuery ? `?q=${cityQuery}` : `?lat=${lat}&lon=${lon}`;
 
       const [curRes, fcRes] = await Promise.all([
-        fetch(`http://localhost:5000/api/weather/current${queryStr}`).then(r => r.json()),
-        fetch(`http://localhost:5000/api/weather/forecast${queryStr}`).then(r => r.json())
+        fetch(`https://sftr-api.onrender.com/api/weather/current${queryStr}`).then(r => r.json()),
+        fetch(`https://sftr-api.onrender.com/api/weather/forecast${queryStr}`).then(r => r.json())
       ]);
 
       if (curRes.success) {

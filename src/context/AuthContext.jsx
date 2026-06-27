@@ -116,7 +116,7 @@ export function AuthProvider({ children }) {
       if (hasToken) {
         // dynamic import or fetch here since the user removed apiService import
         // using fetch directly to avoid import issues
-        await fetch('http://localhost:5000/api/auth/logout', { 
+        await fetch('https://sftr-api.onrender.com/api/auth/logout', { 
           method: 'POST', 
           headers: { 
             'Authorization': `Bearer ${hasToken}`,
