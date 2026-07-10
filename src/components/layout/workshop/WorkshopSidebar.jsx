@@ -18,7 +18,7 @@ const navItems = [
     items: [
       { id: 'ws-shop',        label: "Workshop Profile & Services", icon: Store,        badge: null },
       { id: 'ws-tasks',       label: "Vehicle repair form",            icon: ClipboardList, badge: 4  },
-      { id: 'ws-mechanics',   label: "Vehicle repairman manager",    icon: Users,        badge: null },
+      { id: 'ws-mechanics',   label: "Workshop Staff",    icon: Users,        badge: null },
       { id: 'ws-reviews',     label: "Customer reviews",   icon: Star,         badge: 2  },
       { id: 'ws-stats',       label: "Contribution statistics",     icon: BarChart2,    badge: null },
     ],
@@ -36,7 +36,7 @@ const navItems = [
   },
 ];
 
-export default function WorkshopSidebar({ activePage, onNavigate, collapsed, onToggleCollapse }) {
+export default function WorkshopSidebar({ activePage, onNavigate, collapsed, onToggleCollapse, activeSOSCount = 0 }) {
   const [unreadCount, setUnreadCount] = useState(() => {
     const cached = localStorage.getItem('total_unread_count');
     return cached ? parseInt(cached, 10) : 0;
@@ -48,7 +48,7 @@ export default function WorkshopSidebar({ activePage, onNavigate, collapsed, onT
     const checkNew = async () => {
       const lastSeen = localStorage.getItem('lastVisitedCommunityVerification');
       try {
-        const res = await fetch(`https://sftr-api.onrender.com/api/incident-reports/new-count${lastSeen ? `?since=${lastSeen}` : ''}`);
+        const res = await fetch(`http://localhost:5000/api/incident-reports/new-count${lastSeen ? `?since=${lastSeen}` : ''}`);
         const data = await res.json();
         if (data.success) setNewReportsCount(data.count);
       } catch (err) {
@@ -127,6 +127,8 @@ export default function WorkshopSidebar({ activePage, onNavigate, collapsed, onT
                     ? (unreadCount > 0 && <span className="nav-badge">{unreadCount}</span>)
                     : item.id === 'user-reports'
                     ? (newReportsCount > 0 && <span className="nav-badge">{newReportsCount}</span>)
+                    : item.id === 'user-sos'
+                    ? (activeSOSCount > 0 && <span className="nav-badge">{activeSOSCount}</span>)
                     : (item.badge && <span className="nav-badge">{item.badge}</span>)}
                 </button>
               );

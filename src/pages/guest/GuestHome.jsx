@@ -64,30 +64,11 @@ export default function GuestHome({ onLoginToUser, onRegister }) {
 
   // Helper to get water level badge and styling
   const getWaterLevelBadge = (level, status, calib_empty_cm) => {
-    if (status === 'offline' || status === 'error') {
-      return { label: "Lost connection", className: 'badge-gray', color: 'var(--text-muted)', mapColor: '#475569' };
+    const current = level || 0;
+    if (current > 5) {
+      return { label: `${Math.round(current * 10) / 10} cm`, className: 'badge-green', color: 'var(--green-400)', mapColor: '#22c55e' };
     }
-    
-    const calib = calib_empty_cm || 100;
-    const pct = (level / calib) * 100;
-    const l1 = systemConfig?.water_level_l1 ?? 20;
-    const l2 = systemConfig?.water_level_l2 ?? 40;
-    const l3 = systemConfig?.water_level_l3 ?? 50;
-    const l4 = systemConfig?.water_level_l4 ?? 60;
-
-    if (pct >= l4) {
-      return { label: "Critical flooding", className: 'badge-purple', color: 'var(--purple-400)', mapColor: '#a855f7' };
-    }
-    if (pct >= l3) {
-      return { label: "Severe flooding", className: 'badge-red', color: 'var(--red-400)', mapColor: '#ef4444' };
-    }
-    if (pct >= l2) {
-      return { label: "Moderate flooding", className: 'badge-orange', color: 'var(--orange-400)', mapColor: '#f97316' };
-    }
-    if (pct >= l1) {
-      return { label: "Slight flooding", className: 'badge-gold', color: 'var(--gold-400)', mapColor: '#eab308' };
-    }
-    return { label: "Safe", className: 'badge-green', color: 'var(--green-400)', mapColor: '#22c55e' };
+    return { label: "No water", className: 'badge-gray', color: 'var(--text-muted)', mapColor: '#64748b' };
   };
 
   // Filter sensors based on search box input
@@ -105,8 +86,8 @@ export default function GuestHome({ onLoginToUser, onRegister }) {
       <WeatherBanner />
 
       {/* ── INTERACTIVE FLOOD MAP (Xem bản đồ, vị trí trạm, mực nước cm, chi tiết điểm ngập) ── */}
-      <div className="card" style={{ display: 'flex', flexDirection: 'column', height: 520, overflow: 'hidden', marginBottom: 24, position: 'relative' }}>
-        <LiveMap hideWrapper height={520} onClickDetail={(device) => setDetailDeviceId(device.id || device.device_code)}>
+      <div className="card" style={{ display: 'flex', flexDirection: 'column', height: 620, overflow: 'hidden', marginBottom: 24, position: 'relative' }}>
+        <LiveMap hideWrapper height={620} onClickDetail={(device) => setDetailDeviceId(device.id || device.device_code)}>
           {detailDeviceId && <DeviceDetailPanel deviceId={detailDeviceId} onClose={() => setDetailDeviceId(null)} />}
         </LiveMap>
       </div>

@@ -14,7 +14,6 @@ const SupportAnalytics = lazy(() => import('./pages/admin/SupportAnalytics'));
 const UserProfile      = lazy(() => import('./pages/user/UserProfile'));
 const VehicleTracking   = lazy(() => import('./pages/admin/VehicleTracking'));
 const RoutingConfig     = lazy(() => import('./pages/admin/RoutingConfig'));
-const CommentModeration = lazy(() => import('./pages/admin/CommentModeration'));
 const DeviceActuationLogs = lazy(() => import('./pages/admin/DeviceActuationLogs'));
 const OAuthClients      = lazy(() => import('./pages/admin/OAuthClients'));
 const PushTokens        = lazy(() => import('./pages/admin/PushTokens'));
@@ -50,7 +49,6 @@ const pages = {
   'support-analytics':  SupportAnalytics,
   'vehicle-tracking':   VehicleTracking,
   'routing-config':     RoutingConfig,
-  'comment-moderation': CommentModeration,
   'device-actuation-logs': DeviceActuationLogs,
   'oauth-clients':      OAuthClients,
   'push-tokens':        PushTokens,

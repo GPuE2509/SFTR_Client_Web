@@ -3,6 +3,7 @@ import { Camera, MapPin, X, Send, AlertTriangle, Search } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { apiService } from '../../services/apiService';
+import GoongMaplibreLayer from '../common/GoongMaplibreLayer';
 
 // Import Leaflet CSS
 import 'leaflet/dist/leaflet.css';
@@ -523,10 +524,7 @@ export default function WorkshopRegistrationModal({ isOpen, onClose, onSuccess }
                   onMouseLeave={(e) => e.currentTarget.style.borderColor = 'var(--border-dim)'}
                 >
                   <MapContainer center={mapCenter} zoom={15} style={{ height: '100%', width: '100%' }} dragging={false} zoomControl={false} scrollWheelZoom={false} doubleClickZoom={false} touchZoom={false}>
-                    <TileLayer
-                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                    />
+                    <GoongMaplibreLayer apiKey="S6RMPleSOa7QXQgi5byo4rewtt9pRnwzzHjetKjf" />
                     <ChangeMapCenter center={mapCenter} />
                   </MapContainer>
                   
@@ -663,10 +661,7 @@ export default function WorkshopRegistrationModal({ isOpen, onClose, onSuccess }
                   {/* Large Map Container */}
                   <div style={{ position: 'relative', flex: 1, borderRadius: 'var(--r-md)', overflow: 'hidden', border: '1px solid var(--border-dim)', marginBottom: '12px' }}>
                     <MapContainer center={mapCenter} zoom={15} style={{ height: '100%', width: '100%' }}>
-                      <TileLayer
-                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                      />
+                      <GoongMaplibreLayer apiKey="S6RMPleSOa7QXQgi5byo4rewtt9pRnwzzHjetKjf" />
                       <MapEventsHandler onMapMoveEnd={handleMapMoveEnd} />
                       <ChangeMapCenter center={mapCenter} />
                     </MapContainer>

@@ -1,20 +1,22 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   AlertTriangle, Navigation, PhoneCall, ShieldCheck,
   MapPin, Clock, Send, LifeBuoy, Plus, Trash2, Edit2,
   CheckCircle, Radio, Car, Crosshair, Building2, Pill,
-  Heart, Phone, X, Save, Bell, Activity,
+  Heart, Phone, X, Save, Bell, Activity, Camera, Loader,
+  Bike, XCircle, Maximize, Minimize
 } from 'lucide-react';
+import { MapContainer, TileLayer, Marker, Polyline, useMap, useMapEvents, Popup } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import GoongMaplibreLayer from '../../components/common/GoongMaplibreLayer';
+import { apiService } from '../../services/apiService';
 
 // ── Mock Data ────────────────────────────────────────────────────────────────
 
-const trackingSteps = [
-  { time: '14:32', label: "Receiving SOS", desc: "The system has recorded the rescue request", status: 'done' },
-  { time: '14:34', label: "Rescue route", desc: "Volunteer coordinator Nguyen Van An", status: 'done' },
-  { time: '14:38', label: "The ambulance is on the move", desc: "ETA: 4 minutes — Arriving at your location", status: 'active' },
-  { time: '14:55', label: "Field support", desc: "Waiting for volunteers to arrive", status: 'pending' },
-  { time: '—', label: "Complete rescue", desc: "Confirm safety to complete", status: 'pending' },
-];
+// ── Mock Data ────────────────────────────────────────────────────────────────
+
+const trackingSteps = [];
 
 const emergencyServices = [
   { name: "District 12 Hospital", type: 'hospital', address: "14 To Ky, Trung My Tay Ward", phone: '028 3891 1234', dist: '1.2 km', icon: Building2, color: 'var(--red-400)' },
@@ -24,10 +26,7 @@ const emergencyServices = [
   { name: "Community shelter Q12", type: 'shelter', address: "People's Committee of Thoi An Ward, District 12", phone: '028 3891 7890', dist: '1.9 km', icon: Building2, color: 'var(--blue-400)' },
 ];
 
-const initContacts = [
-  { id: 'ct1', name: "Nguyen Thi Mother", relation: "Mom", phone: '0901234567', notify: true },
-  { id: 'ct2', name: "Tran Van Ba", relation: 'Anh', phone: '0912345678', notify: true },
-];
+const initContacts = [];
 
 const SOS_TYPES = [
   { id: 'flood', label: "The car stalled due to flooding", icon: Car },
@@ -38,57 +37,428 @@ const SOS_TYPES = [
 
 // ── SVG Map: User + Rescue Vehicle ──────────────────────────────────────────
 
-function RescueMap({ eta }) {
+function RescueMap({ eta, currentRescue, userLat, userLng }) {
+  const [activeVolunteers, setActiveVolunteers] = useState([]);
+  const [routePath, setRoutePath] = useState([]);
+  const [autoCenter, setAutoCenter] = useState(true);
+
+  useEffect(() => {
+    const hasAssigned = currentRescue && currentRescue.assigned_volunteer_id;
+    if (hasAssigned) {
+      setActiveVolunteers([]);
+      return;
+    }
+
+    const fetchActiveVolunteers = async () => {
+      try {
+        const res = await apiService.get('/volunteers/active');
+        if (res && res.success && res.data) {
+          setActiveVolunteers(res.data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch active volunteers:', err);
+      }
+    };
+
+    fetchActiveVolunteers();
+    const interval = setInterval(fetchActiveVolunteers, 5000);
+    return () => clearInterval(interval);
+  }, [currentRescue]);
+
+  const assignedVol = currentRescue?.assigned_volunteer_id;
+  const hasAssigned = !!assignedVol;
+
+  const userPosition = [userLat || 10.8564, userLng || 106.6234];
+  const assignedPosition = hasAssigned && assignedVol.current_lat && assignedVol.current_lng
+    ? [assignedVol.current_lat, assignedVol.current_lng]
+    : null;
+
+  const [routeDistance, setRouteDistance] = useState(null);
+  const [routeDuration, setRouteDuration] = useState(null);
+  const [floodedSensors, setFloodedSensors] = useState([]);
+  const [hazardPoints, setHazardPoints] = useState([]);
+
+  useEffect(() => {
+    const fetchMapDetails = async () => {
+      try {
+        const iotRes = await apiService.get('/iot/devices');
+        if (iotRes && iotRes.success && iotRes.data) {
+          const flooded = iotRes.data.filter(d => d.warning_water_status !== 'safe');
+          setFloodedSensors(flooded);
+        }
+        const hazardRes = await apiService.get('/incident-reports');
+        if (hazardRes && hazardRes.success && hazardRes.data) {
+          const approved = hazardRes.data.filter(h => h.moderation_status === 'Approved');
+          setHazardPoints(approved);
+        }
+      } catch (err) {
+        console.error('Failed to fetch map details:', err);
+      }
+    };
+    fetchMapDetails();
+  }, []);
+
+  // Fetch Goong route between volunteer and victim
+  useEffect(() => {
+    if (!hasAssigned || !assignedPosition) {
+      setRoutePath([]);
+      setRouteDistance(null);
+      setRouteDuration(null);
+      return;
+    }
+
+    const fetchRoute = async () => {
+      try {
+        const start = `${assignedPosition[0]},${assignedPosition[1]}`;
+        const end = `${userPosition[0]},${userPosition[1]}`;
+        const res = await apiService.get(`/map/route?start=${start}&end=${end}`);
+        if (res && res.success && res.data && res.data.length > 0) {
+          const coordinates = res.data[0].geometry.coordinates.map(c => [c[1], c[0]]);
+          setRoutePath(coordinates);
+          setRouteDistance(res.data[0].distance);
+          setRouteDuration(res.data[0].duration);
+        } else {
+          setRoutePath([]);
+          setRouteDistance(null);
+          setRouteDuration(null);
+        }
+      } catch (err) {
+        console.error('Failed to fetch Goong route path:', err);
+        setRoutePath([]);
+        setRouteDistance(null);
+        setRouteDuration(null);
+      }
+    };
+
+    fetchRoute();
+  }, [hasAssigned, assignedPosition?.[0], assignedPosition?.[1], userPosition[0], userPosition[1]]);
+
+  // Custom icons configuration
+  const motorcycleIcon = useMemo(() => L.divIcon({
+    className: 'custom-motorcycle-icon',
+    html: `<div style="width: 28px; height: 28px; border-radius: 50%; background: var(--orange-400); border: 2px solid white; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 10px var(--orange-400);"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18.5" cy="17.5" r="2.5"/><circle cx="5.5" cy="17.5" r="2.5"/><path d="M15 8h1a2 2 0 0 1 2 2v2"/><path d="M10.5 17.5 9 12H3"/><path d="m14 17.5-1.5-6H9"/><path d="M12 9h3.5l2 3.5"/></svg></div>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14]
+  }), []);
+
+  const nearbyIcon = useMemo(() => L.divIcon({
+    className: 'custom-nearby-icon',
+    html: `<div style="width: 24px; height: 24px; border-radius: 50%; background: var(--green-400); border: 2px solid white; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 8px var(--green-400);"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18.5" cy="17.5" r="2.5"/><circle cx="5.5" cy="17.5" r="2.5"/><path d="M15 8h1a2 2 0 0 1 2 2v2"/><path d="M10.5 17.5 9 12H3"/><path d="m14 17.5-1.5-6H9"/><path d="M12 9h3.5l2 3.5"/></svg></div>`,
+    iconSize: [24, 24],
+    iconAnchor: [12, 12]
+  }), []);
+
+  const userIcon = useMemo(() => L.divIcon({
+    className: 'custom-user-icon',
+    html: `<div style="position: relative;"><div style="position: absolute; inset: -10px; border-radius: 50%; background: var(--cyan-400); opacity: 0.25; animation: pulse-ring 1.8s infinite ease-out;"></div><div style="width: 18px; height: 18px; border-radius: 50%; background: var(--cyan-400); border: 2px solid white; box-shadow: 0 0 12px var(--cyan-400);"></div></div>`,
+    iconSize: [18, 18],
+    iconAnchor: [9, 9]
+  }), []);
+
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const mapRef = useRef(null);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (!mapRef.current) return;
+    if (!document.fullscreenElement) {
+      mapRef.current.requestFullscreen().catch(err => {
+        console.error(`Error enabling fullscreen: ${err.message}`);
+      });
+    } else {
+      document.exitFullscreen();
+    }
+  };
+
+  // Map viewport bounds controller
+  function MapController({ center, hasAssigned, assignedPosition, isFullscreen, autoCenter, setAutoCenter }) {
+    const map = useMap();
+    
+    useMapEvents({
+      dragstart: () => {
+        setAutoCenter(false);
+      },
+      zoomstart: () => {
+        setAutoCenter(false);
+      }
+    });
+
+    useEffect(() => {
+      if (!autoCenter) return;
+      if (!center || isNaN(center[0]) || isNaN(center[1])) {
+        return; // Prevent crash on invalid user coordinates
+      }
+      map.invalidateSize();
+      const timer1 = setTimeout(() => {
+        map.invalidateSize();
+      }, 100);
+      const timer2 = setTimeout(() => {
+        map.invalidateSize();
+        if (hasAssigned && assignedPosition && !isNaN(assignedPosition[0]) && !isNaN(assignedPosition[1])) {
+          const isTooClose = Math.abs(center[0] - assignedPosition[0]) < 0.0003 && Math.abs(center[1] - assignedPosition[1]) < 0.0003;
+          if (!isTooClose) {
+            map.fitBounds([center, assignedPosition], { padding: [50, 50] });
+          } else {
+            map.setView(center, 17);
+          }
+        } else {
+          map.setView(center, 14);
+        }
+      }, 500);
+      return () => {
+        clearTimeout(timer1);
+        clearTimeout(timer2);
+      };
+    }, [center, hasAssigned, assignedPosition, map, isFullscreen, autoCenter]);
+    return null;
+  }
+
   return (
-    <div style={{ position: 'relative', height: 320, background: '#080d16', borderRadius: 'var(--r-md)', overflow: 'hidden' }}>
-      {/* Grid roads */}
-      <svg width="100%" height="100%" style={{ position: 'absolute', inset: 0, opacity: 0.15 }}>
-        {[60, 120, 180, 240, 300, 360].map(x => <line key={`v${x}`} x1={x} y1={0} x2={x} y2={320} stroke="#3d7db0" strokeWidth={0.5} />)}
-        {[60, 120, 180, 240, 300].map(y => <line key={`h${y}`} x1={0} y1={y} x2={480} y2={y} stroke="#3d7db0" strokeWidth={0.5} />)}
-        {/* Main roads */}
-        <line x1={0} y1={160} x2={480} y2={160} stroke="#3d7db0" strokeWidth={2} />
-        <line x1={240} y1={0} x2={240} y2={320} stroke="#3d7db0" strokeWidth={2} />
-        <text x={12} y={156} fontSize={8} fill="#45b3c0" fontFamily="monospace">To Ky</text>
-        <text x={244} y={20} fontSize={8} fill="#45b3c0" fontFamily="monospace">Quang Trung</text>
-      </svg>
+    <div ref={mapRef} style={{
+      position: 'relative',
+      width: '100%',
+      height: isFullscreen ? '100%' : 320,
+      borderRadius: isFullscreen ? 0 : 'var(--r-md)',
+      overflow: 'hidden',
+      background: '#080d16'
+    }}>
+      <button
+        onClick={toggleFullscreen}
+        style={{
+          position: 'absolute',
+          top: 12,
+          left: 12,
+          zIndex: 1000,
+          background: 'rgba(0,0,0,0.75)',
+          border: '1px solid var(--border-dim)',
+          borderRadius: 4,
+          width: 32,
+          height: 32,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+          color: 'white'
+        }}
+        title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+      >
+        {isFullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
+      </button>
 
-      {/* Rescue route dotted line */}
-      <svg width="100%" height="100%" style={{ position: 'absolute', inset: 0 }}>
-        <line x1={100} y1={90} x2={220} y2={160} stroke="var(--orange-400)" strokeWidth={2} strokeDasharray="6,4" opacity={0.7} />
-      </svg>
+      {/* Recenter Button */}
+      <button
+        onClick={() => setAutoCenter(true)}
+        style={{
+          position: 'absolute',
+          top: 12,
+          right: 12,
+          zIndex: 1000,
+          background: autoCenter ? 'var(--cyan-400)' : 'rgba(0,0,0,0.75)',
+          border: '1px solid var(--border-dim)',
+          borderRadius: 4,
+          padding: '6px 10px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          cursor: 'pointer',
+          color: autoCenter ? '#080d16' : 'white',
+          fontSize: '0.72rem',
+          fontWeight: 700,
+          boxShadow: autoCenter ? '0 0 10px var(--cyan-400)' : 'none',
+          transition: 'all 0.15s'
+        }}
+      >
+        <Crosshair size={13} /> {autoCenter ? 'Tracking' : 'Recenter'}
+      </button>
 
-      {/* User location */}
-      <div style={{ position: 'absolute', left: 220, top: 160, transform: 'translate(-50%,-50%)', zIndex: 10 }}>
-        <div style={{ position: 'absolute', inset: -12, borderRadius: '50%', background: 'var(--cyan-400)', opacity: 0.15, animation: 'pulse-ring 1.8s infinite ease-out' }} />
-        <div style={{ width: 16, height: 16, borderRadius: '50%', background: 'var(--cyan-400)', border: '2px solid white', boxShadow: '0 0 12px var(--cyan-400)' }} />
-        <div style={{ position: 'absolute', top: -26, left: '50%', transform: 'translateX(-50%)', background: 'rgba(6,182,212,0.9)', color: 'white', fontSize: '0.6rem', fontWeight: 700, padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap' }}>
-          YOUR LOCATION
+      {/* Route Info Overlay */}
+      {routeDistance !== null && routeDuration !== null && (
+        <div style={{
+          position: 'absolute',
+          top: 12,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 1000,
+          background: 'rgba(8, 13, 22, 0.9)',
+          border: '1px solid var(--border-dim)',
+          borderRadius: 4,
+          padding: '6px 12px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          backdropFilter: 'blur(10px)',
+          boxShadow: '0 4px 15px rgba(0,0,0,0.5)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ fontSize: '0.62rem', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Distance</span>
+            <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--cyan-400)', fontFamily: 'var(--font-mono)' }}>
+              {routeDistance >= 1000 ? `${(routeDistance / 1000).toFixed(1)} km` : `${Math.round(routeDistance)} m`}
+            </span>
+          </div>
+          <div style={{ width: 1, height: 12, background: 'var(--border-dim)' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ fontSize: '0.62rem', textTransform: 'uppercase', color: 'var(--text-muted)' }}>ETA</span>
+            <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--green-400)', fontFamily: 'var(--font-mono)' }}>
+              {routeDuration >= 3600 
+                ? `${Math.floor(routeDuration / 3600)}h ${Math.round((routeDuration % 3600) / 60)}m` 
+                : `${Math.ceil(routeDuration / 60)} mins`}
+            </span>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Rescue vehicle */}
-      <div style={{ position: 'absolute', left: 100, top: 90, transform: 'translate(-50%,-50%)', zIndex: 10, animation: 'pulse-ring 1.2s infinite ease-out' }}>
-        <div style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--orange-400)', border: '2px solid white', boxShadow: '0 0 14px var(--orange-400)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Car size={10} color="white" />
-        </div>
-        <div style={{ position: 'absolute', top: -26, left: '50%', transform: 'translateX(-50%)', background: 'rgba(249,115,22,0.9)', color: 'white', fontSize: '0.6rem', fontWeight: 700, padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap' }}>
-          RESCUE VEHICLE
-        </div>
-      </div>
+      <MapContainer
+        center={userPosition}
+        zoom={14}
+        zoomControl={false}
+        style={{ width: '100%', height: '100%', background: '#080d16' }}
+      >
+        <GoongMaplibreLayer apiKey="S6RMPleSOa7QXQgi5byo4rewtt9pRnwzzHjetKjf" />
 
-      {/* ETA label */}
-      <div style={{ position: 'absolute', top: 12, right: 12, background: 'rgba(0,0,0,0.65)', border: '1px solid var(--orange-400)', borderRadius: 6, padding: '6px 12px', textAlign: 'center' }}>
-        <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', letterSpacing: '0.08em' }}>ETA</div>
-        <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--orange-400)', fontFamily: 'var(--font-mono)' }}>{eta}</div>
-      </div>
+        <MapController 
+          center={userPosition} 
+          hasAssigned={hasAssigned} 
+          assignedPosition={assignedPosition} 
+          isFullscreen={isFullscreen} 
+          autoCenter={autoCenter} 
+          setAutoCenter={setAutoCenter} 
+        />
+
+        {/* User Marker */}
+        <Marker position={userPosition} icon={userIcon} />
+
+        {/* Assigned Rescuer & Path */}
+        {hasAssigned && assignedPosition && (
+          <>
+            {routePath.length > 0 ? (
+              <Polyline
+                positions={routePath}
+                color="var(--orange-400)"
+                weight={4}
+                opacity={0.85}
+              />
+            ) : (
+              <Polyline
+                positions={[assignedPosition, userPosition]}
+                color="var(--orange-400)"
+                weight={3}
+                dashArray="6, 6"
+                opacity={0.8}
+              />
+            )}
+            <Marker position={assignedPosition} icon={motorcycleIcon} />
+          </>
+        )}
+
+        {/* Nearby Active Volunteers */}
+        {!hasAssigned && activeVolunteers.map(vol => {
+          if (!vol.current_lat || !vol.current_lng) return null;
+          return (
+            <Marker
+              key={vol._id}
+              position={[vol.current_lat, vol.current_lng]}
+              icon={nearbyIcon}
+            />
+          );
+        })}
+
+        {/* Flooded Sensors */}
+        {floodedSensors.map((f, idx) => {
+          if (f.lat === undefined || f.lat === null || f.lng === undefined || f.lng === null) return null;
+          
+          const currentLevel = f.waterLevel || f.current_water_level || 0;
+          const hasWater = currentLevel > 5;
+          const levelText = `${Math.round(currentLevel * 10) / 10} cm`;
+          
+          let mapColor = '#22c55e'; // default green
+          if (f.warning_water_status === 'danger' || currentLevel > 50) {
+            mapColor = '#ef4444'; // red
+          } else if (f.warning_water_status === 'warning' || currentLevel > 15) {
+            mapColor = '#f97316'; // orange
+          }
+
+          return (
+            <Marker
+              key={`sensor-${idx}`}
+              position={[f.lat, f.lng]}
+              icon={L.divIcon({
+                className: 'custom-sensor-marker leaflet-interactive',
+                html: `
+                  <div style="position: relative; display: flex; flex-direction: column; align-items: center; pointer-events: none;">
+                    ${hasWater ? `<div style="position: absolute; bottom: 38px; background: ${mapColor}; color: white; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 700; white-space: nowrap; box-shadow: 0 2px 5px rgba(0,0,0,0.3); border: 1.5px solid white; z-index: 10;">${levelText}</div>` : ''}
+                    <div style="background-color: ${mapColor}; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 15px ${mapColor}80; border: 3px solid white; position: relative; z-index: 2;">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 14a8 8 0 0 1 16 0"></path><path d="M8 14a4 4 0 0 1 8 0"></path><path d="M12 14v.01"></path><path d="M2 14h20"></path><path d="M12 2v20"></path>
+                      </svg>
+                      ${hasWater ? `<div style="position: absolute; width: 100%; height: 100%; border-radius: 50%; border: 2px solid ${mapColor}; animation: pulse-ring 1.5s cubic-bezier(0, 0, 0.2, 1) infinite; box-sizing: border-box; z-index: -1;"></div>` : ''}
+                    </div>
+                  </div>
+                `,
+                iconSize: [36, 36],
+                iconAnchor: [18, 18],
+                popupAnchor: [0, -18]
+              })}
+            >
+              <Popup>
+                <div style={{ padding: '2px 4px', fontSize: '0.82rem' }}>
+                  <strong style={{ color: mapColor, display: 'block', marginBottom: 4 }}>⚠️ Flooded Area</strong>
+                  <strong>Sensor:</strong> {f.name}<br />
+                  <strong>Location:</strong> {f.location || 'N/A'}<br />
+                  <strong>Water Status:</strong> <span style={{ color: mapColor, fontWeight: 700 }}>{f.warning_water_status || 'danger'}</span> ({currentLevel} cm)<br />
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
+
+        {/* Hazard Points */}
+        {hazardPoints.map((h, idx) => {
+          if (h.lat === undefined || h.lat === null || h.lng === undefined || h.lng === null) return null;
+          return (
+            <Marker
+              key={`hazard-${idx}`}
+              position={[h.lat, h.lng]}
+              icon={L.divIcon({
+                html: `
+                  <div style="position: relative; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;">
+                    <div style="position: absolute; width: 32px; height: 32px; border-radius: 50%; background: #f97316; opacity: 0.4; animation: pulse-ring 1.2s infinite;"></div>
+                    <div style="width: 22px; height: 22px; border-radius: 50%; background: #f97316; border: 2px solid white; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 6px rgba(0,0,0,0.4); z-index: 10;">
+                      <span style="color: white; font-size: 11px; font-weight: 900; line-height: 1;">⚠️</span>
+                    </div>
+                  </div>
+                `,
+                className: 'leaflet-interactive',
+                iconSize: [32, 32],
+                iconAnchor: [16, 16]
+              })}
+            >
+              <Popup>
+                <div style={{ padding: '2px 4px', fontSize: '0.82rem' }}>
+                  <strong style={{ color: '#f97316', display: 'block', marginBottom: 4 }}>⚠️ Hazard Point</strong>
+                  <strong>Title:</strong> {h.title}<br />
+                  <strong>Description:</strong> {h.description || 'N/A'}<br />
+                  <strong>Report Type:</strong> {h.report_type || 'N/A'}<br />
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
+      </MapContainer>
 
       {/* Legend */}
-      <div style={{ position: 'absolute', bottom: 10, left: 10, display: 'flex', gap: 12 }}>
+      <div style={{ position: 'absolute', bottom: 10, left: 10, display: 'flex', gap: 12, zIndex: 1000 }}>
         {[
-          { color: 'var(--cyan-400)', label: "Friend" },
-          { color: 'var(--orange-400)', label: "Rescue vehicle" },
+          { color: 'var(--cyan-400)', label: "Your location" },
+          hasAssigned ? { color: 'var(--orange-400)', label: "Assigned rescuer" } : { color: 'var(--green-400)', label: "Nearby rescuers" },
         ].map(s => (
-          <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(0,0,0,0.45)', padding: '3px 8px', borderRadius: 4 }}>
+          <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(0,0,0,0.75)', padding: '4px 8px', borderRadius: 4, border: '1px solid var(--border-dim)' }}>
             <div style={{ width: 8, height: 8, borderRadius: '50%', background: s.color }} />
             <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)' }}>{s.label}</span>
           </div>
@@ -102,6 +472,18 @@ function RescueMap({ eta }) {
 
 export default function UserSOS() {
   const [activeTab, setActiveTab] = useState('send');
+  const showToast = (title, body) => {
+    window.dispatchEvent(new CustomEvent('show-toast', {
+      detail: { title, body, isNotification: true, showAction: false }
+    }));
+  };
+  const [confirmModal, setConfirmModal] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: null // 'cancel' or 'safe'
+  });
+  const [safePhotos, setSafePhotos] = useState([]);
   const [contacts, setContacts] = useState(initContacts);
   const [sent, setSent] = useState(false);
   const [safe, setSafe] = useState(false);
@@ -112,18 +494,360 @@ export default function UserSOS() {
   const [eta] = useState("4 minutes");
   const [safeChecked, setSafeChecked] = useState(false);
 
+  const [phone, setPhone] = useState('');
+  const [coords, setCoords] = useState({ lat: null, lng: null, address: 'Locating...' });
+  const [isSending, setIsSending] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
+
+  const [customEmergencyType, setCustomEmergencyType] = useState('');
+  const [photos, setPhotos] = useState([]);
+  const [gpsApproved, setGpsApproved] = useState(false);
+  const [gpsLoading, setGpsLoading] = useState(true);
+  const [currentRescue, setCurrentRescue] = useState(null);
+
+  const handleImageUpload = (e) => {
+    const files = Array.from(e.target.files);
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPhotos(prev => [...prev, reader.result]);
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const removePhoto = (index) => {
+    setPhotos(prev => prev.filter((_, i) => i !== index));
+  };
+
+  useEffect(() => {
+    // Get user's phone number on mount
+    const fetchProfile = async () => {
+      try {
+        const res = await apiService.get('/auth/profile');
+        if (res && res.user && res.user.phone) {
+          setPhone(res.user.phone);
+        }
+      } catch (err) {
+        console.error('Failed to fetch user profile:', err);
+      }
+    };
+    fetchProfile();
+
+    // Check for active rescue request on mount and on update events
+    const checkCurrentRescue = async () => {
+      try {
+        const res = await apiService.get('/rescue/current');
+        if (res && res.success && res.data) {
+          setCurrentRescue(res.data);
+          setActiveTab('send');
+        } else {
+          setCurrentRescue(null);
+        }
+      } catch (err) {
+        console.error('Failed to get current rescue session:', err);
+      }
+    };
+    checkCurrentRescue();
+
+    // Geolocation detection
+    if (navigator.geolocation) {
+      setGpsLoading(true);
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setCoords({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            address: `${pos.coords.latitude.toFixed(4)}° N, ${pos.coords.longitude.toFixed(4)}° E · Live location determined`
+          });
+          setGpsApproved(true);
+          setGpsLoading(false);
+        },
+        (err) => {
+          console.warn('Geolocation access failed or denied. Using default coordinates.');
+          setCoords(prev => ({
+            ...prev,
+            address: 'Location permission denied. Please grant location access in your browser settings to send an SOS.'
+          }));
+          setGpsApproved(false);
+          setGpsLoading(false);
+        },
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+      );
+    } else {
+      setCoords(prev => ({
+        ...prev,
+        address: 'Geolocation is not supported by your browser.'
+      }));
+      setGpsApproved(false);
+      setGpsLoading(false);
+    }
+  }, []);
+
+  // Listen for active rescue status updates via WebSocket events
+  useEffect(() => {
+    const handleRescueUpdate = async () => {
+      try {
+        const res = await apiService.get('/rescue/current');
+        if (res && res.success) {
+          setCurrentRescue(res.data);
+        }
+      } catch (err) {
+        console.error('Error updating current rescue from event:', err);
+      }
+    };
+    window.addEventListener('rescue-status-update', handleRescueUpdate);
+    window.addEventListener('rescue-update', handleRescueUpdate);
+    return () => {
+      window.removeEventListener('rescue-status-update', handleRescueUpdate);
+      window.removeEventListener('rescue-update', handleRescueUpdate);
+    };
+  }, []);
+
+  // Poll active rescue details for real-time updates when request is active
+  useEffect(() => {
+    if (!currentRescue) return;
+    const shouldPoll = ['Pending', 'Assigned', 'In_Progress', 'Arrived'].includes(currentRescue.status);
+    if (!shouldPoll) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await apiService.get('/rescue/current');
+        if (res && res.success && res.data) {
+          setCurrentRescue(res.data);
+        }
+      } catch (err) {
+        console.error('Error updating moving rescuer coordinates:', err);
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [currentRescue?.status]);
+
+  // Emergency facilities state (real API)
+  const [emergencyFacilities, setEmergencyFacilities] = useState([]);
+  const [loadingEmergency, setLoadingEmergency] = useState(false);
+  const [emergencyError, setEmergencyError] = useState(null);
+  const [emergencyRadius, setEmergencyRadius] = useState(3000);
+  const [userLat, setUserLat] = useState(null);
+  const [userLng, setUserLng] = useState(null);
+
+  // Get user GPS when "Emergency information" tab is active
+  useEffect(() => {
+    if (activeTab !== 'info') return;
+    setLoadingEmergency(true);
+    setEmergencyError(null);
+    const fetchFacilities = (lat, lng) => {
+      apiService.get(`/map/emergency-facilities?lat=${lat}&lng=${lng}&radius=${emergencyRadius}`)
+        .then(res => {
+          if (res.success) setEmergencyFacilities(res.facilities || []);
+          else setEmergencyError('Could not load facilities.');
+        })
+        .catch(() => setEmergencyError('Service unavailable. Try again later.'))
+        .finally(() => setLoadingEmergency(false));
+    };
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          setUserLat(pos.coords.latitude);
+          setUserLng(pos.coords.longitude);
+          fetchFacilities(pos.coords.latitude, pos.coords.longitude);
+        },
+        () => {
+          // Fallback to HCM city center
+          setUserLat(10.8231); setUserLng(106.6297);
+          fetchFacilities(10.8231, 106.6297);
+        },
+        { timeout: 6000 }
+      );
+    } else {
+      fetchFacilities(10.8231, 106.6297);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, emergencyRadius]);
+
   const toggleContact = (id) => setContacts(prev => prev.map(c => c.id === id ? { ...c, notify: !c.notify } : c));
   const removeContact = (id) => setContacts(prev => prev.filter(c => c.id !== id));
 
-  const handleSendSOS = () => {
-    if (!sosDesc.trim()) return;
-    setSent(true);
-    setTimeout(() => setSent(false), 3000);
+  const handleSendSOS = async () => {
+    if (!phone.trim()) {
+      setErrorMsg('Please provide a contact phone number so that the rescue team can reach you.');
+      setSuccessMsg('');
+      return;
+    }
+    if (sosType === 'other' && (!customEmergencyType || !customEmergencyType.trim())) {
+      setErrorMsg('Please enter details for the other emergency situation.');
+      setSuccessMsg('');
+      return;
+    }
+
+    // Try requesting Geolocation dynamically if not already approved
+    let currentCoords = { ...coords };
+    if (!gpsApproved) {
+      if (!navigator.geolocation) {
+        setErrorMsg('Geolocation is not supported by your browser. Cannot send SOS.');
+        return;
+      }
+
+      setIsSending(true);
+      setGpsLoading(true);
+      setErrorMsg('Requesting location access permission...');
+      
+      const getPositionPromise = () => new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 });
+      });
+
+      try {
+        const pos = await getPositionPromise();
+        currentCoords = {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          address: `${pos.coords.latitude.toFixed(4)}° N, ${pos.coords.longitude.toFixed(4)}° E · Live location determined`
+        };
+        setCoords(currentCoords);
+        setGpsApproved(true);
+        setGpsLoading(false);
+        setErrorMsg('');
+      } catch (err) {
+        setIsSending(false);
+        setGpsLoading(false);
+        setErrorMsg('Location access is required to dispatch rescue teams. Please grant location access in your browser settings.');
+        setSuccessMsg('');
+        setGpsApproved(false);
+        setCoords(prev => ({
+          ...prev,
+          address: 'Location permission denied. Please grant location access in your browser settings to send an SOS.'
+        }));
+        return;
+      }
+    }
+
+    if (!currentCoords.lat || !currentCoords.lng) {
+      setErrorMsg('Location access is required to dispatch rescue teams. Please grant location access in your browser settings.');
+      setSuccessMsg('');
+      return;
+    }
+
+    setIsSending(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    // Map internal types to schema-friendly strings
+    const typeMapping = {
+      'flood': 'Trapped_By_Flood',
+      'stuck': 'Trapped_By_Flood',
+      'medical': 'Medical',
+      'other': 'Other'
+    };
+    const emergency_type = typeMapping[sosType] || 'Trapped_By_Flood';
+
+    try {
+      const res = await apiService.post('/rescue', {
+        sender_phone: phone,
+        emergency_type,
+        custom_emergency_type: sosType === 'other' ? customEmergencyType : '',
+        initial_lng: currentCoords.lng,
+        initial_lat: currentCoords.lat,
+        description: sosDesc || '',
+        photos: photos // Array of base64 strings
+      });
+
+      if (res && res.success) {
+        setSent(true);
+        setSuccessMsg(res.message || '✓ Emergency SOS signal sent successfully!');
+        setSosDesc('');
+        setCustomEmergencyType('');
+        setPhotos([]);
+        
+        try {
+          const checkRes = await apiService.get('/rescue/current');
+          if (checkRes && checkRes.success && checkRes.data) {
+            setCurrentRescue(checkRes.data);
+          }
+        } catch (fetchErr) {
+          console.error('Failed to pre-fetch new rescue status:', fetchErr);
+        }
+
+        setTimeout(() => {
+          setSent(false);
+          setSuccessMsg('');
+          setActiveTab('send');
+        }, 1500);
+      } else {
+        setErrorMsg(res.message || 'An error occurred while sending the rescue request.');
+      }
+    } catch (err) {
+      console.error('Failed to submit rescue request:', err);
+      setErrorMsg(err.message || 'Unable to connect to server. Please try again later.');
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const submitCancelSOS = async () => {
+    try {
+      setIsSending(true);
+      const res = await apiService.put(`/rescue/${currentRescue._id}/cancel`);
+      if (res && res.success) {
+        setCurrentRescue(null);
+        showToast('Cancelled successfully', "Rescue request cancelled successfully.");
+      } else {
+        showToast('Error', res.message || "Failed to cancel rescue request.");
+      }
+    } catch (err) {
+      console.error("Failed to cancel rescue request:", err);
+      showToast('Error', err.message || "Error connecting to server.");
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const submitSafeCheck = async () => {
+    try {
+      setIsSending(true);
+      const res = await apiService.put(`/rescue/${currentRescue._id}/safe`, {
+        safe_photos: safePhotos
+      });
+      if (res && res.success) {
+        setCurrentRescue(null);
+        setSafeChecked(true);
+        setSafe(true);
+        showToast('Safety confirmed', "Safety confirmed successfully. Your rescue request has been closed.");
+        setSafePhotos([]);
+        setTimeout(() => {
+          setSafeChecked(false);
+          setSafe(false);
+        }, 1500);
+      } else {
+        showToast('Error', res.message || "Failed to confirm safety.");
+      }
+    } catch (err) {
+      console.error("Failed to confirm safety:", err);
+      showToast('Error', err.message || "Error connecting to server.");
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const handleCancelSOS = () => {
+    if (!currentRescue) return;
+    setConfirmModal({
+      isOpen: true,
+      title: 'Cancel Rescue Request',
+      message: 'Are you sure you want to cancel your emergency rescue request?',
+      type: 'cancel'
+    });
   };
 
   const handleSafeCheck = () => {
-    setSafeChecked(true);
-    setSafe(true);
+    if (!currentRescue) return;
+    setConfirmModal({
+      isOpen: true,
+      title: 'Confirm Safety',
+      message: 'Are you sure you want to confirm safety? This will close the rescue request.',
+      type: 'safe'
+    });
   };
 
   const addContact = () => {
@@ -135,8 +859,6 @@ export default function UserSOS() {
 
   const tabs = [
     { id: 'send', label: "Send SOS", icon: AlertTriangle },
-    { id: 'track', label: "Rescue tracking", icon: Navigation },
-    { id: 'safety', label: "Confirmed safety", icon: ShieldCheck },
     { id: 'contacts', label: "Contact urgently", icon: PhoneCall },
     { id: 'info', label: "Emergency information", icon: LifeBuoy },
   ];
@@ -159,8 +881,124 @@ export default function UserSOS() {
         })}
       </div>
 
-      {/* ── GỬI SOS ── */}
-      {activeTab === 'send' && (
+      {/* ── GỢI Ý CỨU HỘ / THEO DÕI YÊU CẦU ĐANG HOẠT ĐỘNG ── */}
+      {activeTab === 'send' && currentRescue && (
+        <div style={{ display: 'grid', gap: 16 }}>
+          <div className="card" style={{ overflow: 'hidden' }}>
+            <div style={{ padding: '12px 18px', background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div className="flex items-center gap-2">
+                <Navigation size={14} color="var(--orange-400)" />
+                <div className="section-title">Real-time rescue vehicle tracking map</div>
+              </div>
+              <div className="live-indicator"><div className="live-dot" /> REALTIME</div>
+            </div>
+            <div style={{ padding: 16 }}>
+              <RescueMap
+                eta={eta}
+                currentRescue={currentRescue}
+                userLat={currentRescue ? currentRescue.initial_lat : coords.lat}
+                userLng={currentRescue ? currentRescue.initial_lng : coords.lng}
+              />
+            </div>
+          </div>
+
+          <div className="card" style={{ overflow: 'hidden' }}>
+            <div style={{ padding: '12px 18px', background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div className="section-title">Request processing status</div>
+              <span className={`badge ${currentRescue ? (currentRescue.status === 'Pending' ? 'badge-orange' : 'badge-green') : 'badge-ghost'}`} style={{ fontSize: '0.65rem' }}>
+                {currentRescue ? currentRescue.status.toUpperCase() : 'INACTIVE'}
+              </span>
+            </div>
+            <div style={{ padding: '16px 20px' }}>
+              <div style={{ position: 'relative', marginBottom: 20 }}>
+                {(() => {
+                  if (!currentRescue) return [];
+
+                  const createdTime = new Date(currentRescue.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                  const isAssigned = currentRescue.status === 'Assigned' || currentRescue.status === 'In_Progress' || currentRescue.status === 'Arrived' || currentRescue.status === 'Completed';
+                  const isMoving = currentRescue.status === 'In_Progress' || currentRescue.status === 'Arrived' || currentRescue.status === 'Completed';
+                  const isArrived = currentRescue.status === 'Arrived' || currentRescue.status === 'Completed';
+                  
+                  return [
+                    {
+                      time: createdTime,
+                      label: "Rescue request recorded",
+                      desc: "SOS signal successfully registered by the system",
+                      status: 'done'
+                    },
+                    {
+                      time: isAssigned ? 'Done' : 'Connecting',
+                      label: "Searching for nearby volunteers",
+                      desc: isAssigned ? "Scanning completed." : "Scanning for active volunteers within a 5km radius...",
+                      status: isAssigned ? 'done' : 'active'
+                    },
+                    {
+                      time: isAssigned ? 'Assigned' : '—',
+                      label: isAssigned ? `Volunteer accepted: ${currentRescue.assigned_volunteer_id?.user_id?.full_name || 'Assigned'}` : "Dispatching assistance",
+                      desc: isAssigned 
+                        ? `Volunteer ${currentRescue.assigned_volunteer_id?.user_id?.full_name} (${currentRescue.assigned_volunteer_id?.user_id?.phone || 'No phone'}) has accepted your request.` 
+                        : "Waiting for volunteer assignment...",
+                      status: isMoving ? 'done' : (isAssigned ? 'active' : 'pending')
+                    },
+                    {
+                      time: isMoving ? 'Moving' : '—',
+                      label: "Volunteer moving to scene",
+                      desc: isMoving ? "Volunteer is moving on the safest routing path." : "Waiting for volunteer to start moving...",
+                      status: isArrived ? 'done' : (isMoving ? 'active' : 'pending')
+                    },
+                    {
+                      time: isArrived ? 'Arrived' : '—',
+                      label: "Arrived & assisting",
+                      desc: isArrived ? "Volunteer has arrived at the scene and is assisting you." : "Waiting for volunteer arrival...",
+                      status: isArrived ? 'active' : 'pending'
+                    }
+                  ];
+                })().map((step, i, arr) => (
+                  <div key={i} style={{ display: 'flex', gap: 16, marginBottom: i < arr.length - 1 ? 4 : 0 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 32, flexShrink: 0 }}>
+                      <div style={{
+                        width: 28, height: 28, borderRadius: '50%',
+                        background: step.status === 'done' ? 'var(--green-400)' : step.status === 'active' ? 'var(--orange-400)' : 'var(--bg-elevated)',
+                        border: step.status === 'pending' ? '1px solid var(--border-dim)' : 'none',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        boxShadow: step.status === 'active' ? '0 0 12px var(--orange-400)' : 'none',
+                      }}>
+                        {step.status === 'done' ? <CheckCircle size={14} color="white" /> :
+                          step.status === 'active' ? <Activity size={14} color="white" style={{ animation: 'pulse 1s infinite' }} /> :
+                          <Clock size={12} color="var(--text-muted)" />}
+                      </div>
+                      {i < arr.length - 1 && (
+                        <div style={{ width: 2, flex: 1, minHeight: 28, background: step.status === 'done' ? 'var(--green-400)' : 'var(--border-dim)', margin: '4px 0' }} />
+                      )}
+                    </div>
+                    <div style={{ paddingBottom: i < arr.length - 1 ? 20 : 0, paddingTop: 2 }}>
+                      <div style={{ fontWeight: step.status === 'active' ? 700 : 500, fontSize: '0.88rem', color: step.status === 'active' ? 'var(--orange-400)' : step.status === 'done' ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                        {step.label}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>{step.desc}</div>
+                      <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <Clock size={10} /> {step.time}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 16, display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+                <button className="btn btn-success" onClick={handleSafeCheck} disabled={isSending}>
+                  <ShieldCheck size={14} /> I'm Safe (Confirm safety)
+                </button>
+                <button className="btn btn-danger" onClick={handleCancelSOS} disabled={isSending}>
+                  <XCircle size={14} /> Cancel Request
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── FORM GỬI SOS (CHƯA CÓ YÊU CẦU HOẠT ĐỘNG) ── */}
+      {activeTab === 'send' && !currentRescue && (
         <div className="grid" style={{ gridTemplateColumns: '1.2fr 0.8fr', gap: 16 }}>
           <div className="card p-6">
             <div className="section-title" style={{ marginBottom: 16, color: 'var(--red-400)', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -184,48 +1022,103 @@ export default function UserSOS() {
                       }}
                     >
                       <Icon size={14} color={sosType === t.id ? 'var(--red-400)' : 'var(--text-muted)'} />
-                      <span style={{ fontSize: '0.78rem', color: sosType === t.id ? 'var(--text-primary)' : 'var(--text-muted)', fontWeight: sosType === t.id ? 700 : 400 }}>{t.label}</span>
+                      <span style={{ fontSize: '0.78rem', color: sosType === t.id ? 'var(--red-400)' : 'var(--text-secondary)', fontWeight: 600 }}>{t.label}</span>
                     </button>
                   );
                 })}
               </div>
+              {sosType === 'other' && (
+                <input
+                  className="input"
+                  style={{ marginTop: 8 }}
+                  placeholder="Detail your emergency situation..."
+                  value={customEmergencyType}
+                  onChange={e => setCustomEmergencyType(e.target.value)}
+                />
+              )}
             </div>
 
-            {/* GPS */}
-            <div style={{ padding: '10px 14px', borderRadius: 'var(--r-sm)', background: 'rgba(6,182,212,0.06)', border: '1px solid var(--border-dim)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Crosshair size={14} color="var(--cyan-400)" />
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-primary)' }}>GPS location determined</div>
-                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>10.8564° N, 106.6234° E · To Ky Street, District 12, HCMC</div>
+            {/* Map location coordinate bar */}
+            <div style={{
+              background: gpsApproved ? 'rgba(34,197,94,0.06)' : gpsLoading ? 'rgba(59,130,246,0.06)' : 'rgba(239,68,68,0.06)',
+              border: `1px solid ${gpsApproved ? 'rgba(34,197,94,0.2)' : gpsLoading ? 'rgba(59,130,246,0.2)' : 'rgba(239,68,68,0.2)'}`,
+              borderRadius: 'var(--r-md)', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {gpsLoading ? (
+                  <Loader size={16} color="var(--blue-400)" style={{ animation: 'spin 1.5s infinite linear' }} />
+                ) : (
+                  <Crosshair size={16} color={gpsApproved ? 'var(--green-400)' : 'var(--red-400)'} style={{ animation: gpsLoading ? 'spin 3s infinite linear' : 'none' }} />
+                )}
+                <div>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 700, color: gpsApproved ? 'var(--green-400)' : gpsLoading ? 'var(--blue-400)' : 'var(--red-400)' }}>
+                    {gpsLoading ? 'GPS LOCATING...' : gpsApproved ? 'GPS location determined' : 'NO GPS LOCATION'}
+                  </div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 2 }}>{coords.address}</div>
+                </div>
               </div>
-              <span className="badge badge-green" style={{ fontSize: '0.58rem' }}>GPS ✓</span>
+              <span className={`badge ${gpsApproved ? 'badge-green' : gpsLoading ? 'badge-orange' : 'badge-red'}`} style={{ fontSize: '0.62rem', letterSpacing: '0.04em' }}>
+                {gpsLoading ? 'LOADING' : gpsApproved ? 'GPS ✓' : 'NO GPS ✕'}
+              </span>
             </div>
 
-            <textarea
-              className="input"
-              rows={4}
-              placeholder="Describe your emergency situation (car stalled, traffic jam, need medical aid...)..."
-              value={sosDesc}
-              onChange={e => setSosDesc(e.target.value)}
-              style={{ marginBottom: 12 }}
-            />
+            {/* Phone */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 6 }}>Emergency Contact Phone Number *</label>
+              <input
+                className="input"
+                placeholder="Enter telephone number..."
+                value={phone}
+                onChange={e => setPhone(e.target.value)}
+              />
+            </div>
+
+            {/* Description */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 6 }}>Emergency Situation Description (Optional)</label>
+              <textarea
+                className="input"
+                style={{ minHeight: 80, resize: 'vertical' }}
+                placeholder="Describe your situation (e.g., water flooded to knees, vehicle broken down, accompanied by elderly or children...)..."
+                value={sosDesc}
+                onChange={e => setSosDesc(e.target.value)}
+              />
+            </div>
+
+            {/* Photo Scene Attachment */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 8 }}>Incident Scene Photos (Optional)</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                {photos.map((p, idx) => (
+                  <div key={idx} style={{ position: 'relative', width: 70, height: 70, borderRadius: 'var(--r-sm)', overflow: 'hidden', border: '1px solid var(--border-dim)' }}>
+                    <img src={p} alt="Scene" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    <button onClick={() => removePhoto(idx)} style={{ position: 'absolute', top: 2, right: 2, background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '50%', width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                      <X size={10} color="white" />
+                    </button>
+                  </div>
+                ))}
+                {photos.length < 3 && (
+                  <label style={{
+                    width: 70, height: 70, borderRadius: 'var(--r-sm)', border: '1px dashed var(--border-dim)',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                    background: 'rgba(255,255,255,0.02)', transition: 'all 0.15s'
+                  }}>
+                    <Camera size={18} color="var(--text-muted)" />
+                    <span style={{ fontSize: '0.55rem', color: 'var(--text-muted)', marginTop: 4 }}>Add photo</span>
+                    <input type="file" accept="image/*" multiple onChange={handleImageUpload} style={{ display: 'none' }} />
+                  </label>
+                )}
+              </div>
+            </div>
 
             <button
               className="btn btn-danger"
               onClick={handleSendSOS}
-              style={{ width: '100%', justifyContent: 'center', fontSize: '1rem', fontWeight: 800, padding: '14px', letterSpacing: '0.06em' }}
+              disabled={isSending}
+              style={{ width: '100%', justifyContent: 'center', fontSize: '1rem', fontWeight: 800, padding: '14px', letterSpacing: '0.06em', opacity: isSending ? 0.7 : 1 }}
             >
-              <Radio size={18} /> SEND AN EMERGENCY SOS SIGNAL
+              <Radio size={18} /> {isSending ? 'ĐANG GỬI TÍN HIỆU...' : 'SEND AN EMERGENCY SOS SIGNAL'}
             </button>
-
-            {sent && (
-              <div className="alert-banner success" style={{ marginTop: 12 }}>
-                <CheckCircle size={14} color="var(--green-400)" />
-                <span style={{ fontSize: '0.82rem', color: 'var(--green-400)', fontWeight: 600 }}>
-                  ✓ SOS signal has been sent! The nearest volunteer is being notified.
-                </span>
-              </div>
-            )}
           </div>
 
           <div className="card p-5" style={{ display: 'grid', gap: 14, alignContent: 'start' }}>
@@ -244,131 +1137,6 @@ export default function UserSOS() {
             <div className="alert-banner warning" style={{ marginTop: 4 }}>
               <AlertTriangle size={13} style={{ flexShrink: 0 }} />
               <span style={{ fontSize: '0.75rem' }}>Rescue information will be publicly displayed on the map so other users and volunteers can assist.</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── THEO DÕI CỨU HỘ ── */}
-      {activeTab === 'track' && (
-        <div style={{ display: 'grid', gap: 16 }}>
-          <div className="card" style={{ overflow: 'hidden' }}>
-            <div style={{ padding: '12px 18px', background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div className="flex items-center gap-2">
-                <Navigation size={14} color="var(--orange-400)" />
-                <div className="section-title">Real-time rescue vehicle tracking map</div>
-              </div>
-              <div className="live-indicator"><div className="live-dot" /> REALTIME</div>
-            </div>
-            <div style={{ padding: 16 }}>
-              <RescueMap eta={eta} />
-            </div>
-          </div>
-
-          <div className="card" style={{ overflow: 'hidden' }}>
-            <div style={{ padding: '12px 18px', background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div className="section-title">Request processing status</div>
-              <span className="badge badge-orange" style={{ fontSize: '0.65rem' }}>PROCESSING</span>
-            </div>
-            <div style={{ padding: '16px 20px' }}>
-              <div style={{ position: 'relative' }}>
-                {trackingSteps.map((step, i) => (
-                  <div key={i} style={{ display: 'flex', gap: 16, marginBottom: i < trackingSteps.length - 1 ? 4 : 0 }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 32, flexShrink: 0 }}>
-                      <div style={{
-                        width: 28, height: 28, borderRadius: '50%',
-                        background: step.status === 'done' ? 'var(--green-400)' : step.status === 'active' ? 'var(--orange-400)' : 'var(--bg-elevated)',
-                        border: step.status === 'pending' ? '1px solid var(--border-dim)' : 'none',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        boxShadow: step.status === 'active' ? '0 0 12px var(--orange-400)' : 'none',
-                      }}>
-                        {step.status === 'done' ? <CheckCircle size={14} color="white" /> :
-                          step.status === 'active' ? <Activity size={14} color="white" style={{ animation: 'pulse 1s infinite' }} /> :
-                          <Clock size={12} color="var(--text-muted)" />}
-                      </div>
-                      {i < trackingSteps.length - 1 && (
-                        <div style={{ width: 2, flex: 1, minHeight: 28, background: step.status === 'done' ? 'var(--green-400)' : 'var(--border-dim)', margin: '4px 0' }} />
-                      )}
-                    </div>
-                    <div style={{ paddingBottom: i < trackingSteps.length - 1 ? 20 : 0, paddingTop: 2 }}>
-                      <div style={{ fontWeight: step.status === 'active' ? 700 : 500, fontSize: '0.88rem', color: step.status === 'active' ? 'var(--orange-400)' : step.status === 'done' ? 'var(--text-primary)' : 'var(--text-muted)' }}>
-                        {step.label}
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>{step.desc}</div>
-                      <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <Clock size={10} /> {step.time}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── XÁC NHẬN AN TOÀN ── */}
-      {activeTab === 'safety' && (
-        <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <div className="card p-6">
-            <div className="section-title" style={{ marginBottom: 16, color: 'var(--green-400)', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <ShieldCheck size={15} /> Check-in safely after the incident
-            </div>
-
-            {!safeChecked ? (
-              <>
-                <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 20 }}>
-                  Once you have escaped the emergency situation and are in a safe state, confirm the system to close the rescue session, stop monitoring, and notify your emergency contacts.
-                </p>
-
-                <div style={{ padding: '14px 16px', borderRadius: 'var(--r-md)', background: 'rgba(34,197,94,0.05)', border: '1px solid rgba(34,197,94,0.3)', marginBottom: 20 }}>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                    When confirming safety, the system will:
-                    <ul style={{ paddingLeft: 16, marginTop: 8, display: 'grid', gap: 4 }}>
-                      <li>Record SOS/rescue session completed</li>
-                      <li>Stop real-time location tracking</li>
-                      <li>Update incident status to "Finished"</li>
-                      <li>Notify your emergency contact</li>
-                      <li>Save history and last check-in location</li>
-                    </ul>
-                  </div>
-                </div>
-
-                <button
-                  className="btn btn-success"
-                  onClick={handleSafeCheck}
-                  style={{ width: '100%', justifyContent: 'center', fontSize: '0.95rem', fontWeight: 700, padding: '12px' }}
-                >
-                  <ShieldCheck size={16} /> I'M SAFE
-                </button>
-              </>
-            ) : (
-              <div style={{ textAlign: 'center', padding: '30px 0' }}>
-                <div style={{ width: 70, height: 70, borderRadius: '50%', background: 'rgba(34,197,94,0.15)', border: '3px solid var(--green-400)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
-                  <CheckCircle size={32} color="var(--green-400)" />
-                </div>
-                <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--green-400)', marginBottom: 8 }}>Confirmed safe!</div>
-                <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                  The rescue session has been closed. Your emergency contact has been notified.
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="card p-6">
-            <div className="section-title" style={{ marginBottom: 14 }}>Statistics of rescue sessions</div>
-            <div style={{ display: 'grid', gap: 10 }}>
-              {[
-                { label: "When to send SOS", value: "14:32 today" },
-                { label: "Volunteer support", value: "Nguyen Van An" },
-                { label: "Response time", value: "< 3 minutes" },
-                { label: "Current status", value: safeChecked ? "Finished ✓" : "Processing" },
-              ].map(s => (
-                <div key={s.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', borderRadius: 'var(--r-sm)', background: 'rgba(18,29,40,0.5)', border: '1px solid var(--border-dim)' }}>
-                  <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{s.label}</span>
-                  <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-primary)' }}>{s.value}</span>
-                </div>
-              ))}
             </div>
           </div>
         </div>
@@ -446,50 +1214,194 @@ export default function UserSOS() {
         </div>
       )}
 
-      {/* ── TRUNG TÂM THÔNG TIN KHẨN CẤP ── */}
+      {/* ── EMERGENCY INFO HUB ── */}
       {activeTab === 'info' && (
         <div>
-          <div className="alert-banner info" style={{ marginBottom: 16 }}>
-            <MapPin size={14} color="var(--cyan-400)" style={{ flexShrink: 0 }} />
-            <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-              List of essential services closest to you — data from OpenStreetMap · Overpass API
-            </span>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
+            <div className="alert-banner info" style={{ flex: 1 }}>
+              <MapPin size={14} color="var(--cyan-400)" style={{ flexShrink: 0 }} />
+              <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                {userLat ? `Searching near ${userLat.toFixed(4)}°N, ${userLng.toFixed(4)}°E` : 'Getting your location...'} · OpenStreetMap Overpass API
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {[1000, 3000, 5000].map(r => (
+                <button key={r} onClick={() => setEmergencyRadius(r)}
+                  style={{ fontSize: '0.72rem', padding: '4px 12px', borderRadius: 20, border: `1px solid ${emergencyRadius === r ? '#06b6d4' : 'var(--border-dim)'}`, background: emergencyRadius === r ? 'rgba(6,182,212,0.12)' : 'transparent', color: emergencyRadius === r ? 'var(--cyan-400)' : 'var(--text-muted)', cursor: 'pointer', fontWeight: 700 }}>
+                  {r / 1000} km
+                </button>
+              ))}
+            </div>
           </div>
 
-          {[
-            { group: "Hospitals & Healthcare", types: ['hospital', 'clinic'] },
-            { group: "Pharmacy", types: ['pharmacy'] },
-            { group: "Rescue & Shelter", types: ['rescue', 'shelter'] },
-          ].map(g => {
-            const items = emergencyServices.filter(s => g.types.includes(s.type));
-            return (
-              <div key={g.group} style={{ marginBottom: 20 }}>
-                <div className="section-title" style={{ marginBottom: 12 }}>{g.group}</div>
-                <div style={{ display: 'grid', gap: 10 }}>
-                  {items.map(svc => {
-                    const Icon = svc.icon;
-                    return (
-                      <div key={svc.name} style={{ padding: '14px 16px', borderRadius: 'var(--r-md)', border: '1px solid var(--border-dim)', display: 'flex', alignItems: 'center', gap: 14, background: 'rgba(18,29,40,0.5)' }}>
-                        <div style={{ width: 40, height: 40, borderRadius: 'var(--r-md)', background: svc.color + '15', border: `1px solid ${svc.color}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                          <Icon size={18} color={svc.color} />
-                        </div>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-primary)', marginBottom: 2 }}>{svc.name}</div>
-                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{svc.address}</div>
-                        </div>
-                        <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.9rem', fontWeight: 700, color: svc.color }}>{svc.dist}</div>
-                          <a href={`tel:${svc.phone}`} style={{ fontSize: '0.7rem', color: 'var(--cyan-400)', textDecoration: 'none' }}>
-                            <Phone size={10} style={{ display: 'inline', marginRight: 3 }} />{svc.phone}
-                          </a>
-                        </div>
-                      </div>
-                    );
-                  })}
+          {/* Type legend */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 16 }}>
+            {[['#B91C1C','hospital','Hospital'],['#C2410C','stethoscope','Clinic'],['#047857','cross','Pharmacy'],['#991B1B','flame','Fire/Rescue'],['#4338CA','home','Shelter'],['#1D4ED8','shield','Police']].map(([color, , label]) => (
+              <span key={label} style={{ fontSize: '0.68rem', padding: '2px 8px', borderRadius: 6, border: `1px solid ${color}44`, background: `${color}12`, color }}>{label}</span>
+            ))}
+          </div>
+
+          {loadingEmergency ? (
+            <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--text-muted)' }}>
+              <Loader size={32} className="animate-spin" style={{ margin: '0 auto 16px', display: 'block' }} />
+              <div style={{ fontSize: '0.88rem' }}>Searching emergency facilities via OpenStreetMap...</div>
+            </div>
+          ) : emergencyError ? (
+            <div className="alert-banner warning">
+              <span style={{ fontSize: '0.82rem' }}>⚠️ {emergencyError}</span>
+            </div>
+          ) : emergencyFacilities.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
+              No emergency facilities found within {emergencyRadius / 1000} km.<br />Try increasing the search radius.
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gap: 10 }}>
+              {emergencyFacilities.map(f => {
+                const svgPath = {
+                  hospital:    '<path d="M12 6v4m0 0v4m0-4h4m-4 0H8"/><rect x="3" y="3" width="18" height="18" rx="2"/>',
+                  stethoscope: '<path d="M4.8 2.3A.3.3 0 1 0 5 2H4a2 2 0 0 0-2 2v5a6 6 0 0 0 6 6v0a6 6 0 0 0 6-6V4a2 2 0 0 0-2-2h-1"/><path d="M8 15v1a6 6 0 0 0 6 6v0a6 6 0 0 0 6-6v-4"/><circle cx="20" cy="10" r="2"/>',
+                  cross:       '<path d="M10 2v7H3v6h7v7h4v-7h7V9h-7V2z"/>',
+                  flame:       '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>',
+                  shield:      '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+                  home:        '<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>',
+                  'life-buoy': '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><line x1="4.93" y1="4.93" x2="9.17" y2="9.17"/><line x1="14.83" y1="14.83" x2="19.07" y2="19.07"/>',
+                }[f.icon] || '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>';
+                return (
+                  <div key={f.id} style={{ padding: '12px 14px', borderRadius: 'var(--r-md)', border: '1px solid var(--border-dim)', display: 'flex', alignItems: 'center', gap: 12, background: 'var(--card-bg)' }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 8, background: `${f.color}15`, border: `1px solid ${f.color}33`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: f.color }}>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={f.color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" dangerouslySetInnerHTML={{ __html: svgPath }} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--text-primary)', marginBottom: 2 }}>{f.name}</div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.address || f.label}</div>
+                    </div>
+                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.84rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 4 }}>{f.distStr}</div>
+                      {f.phone && <a href={`tel:${f.phone}`} style={{ fontSize: '0.65rem', color: 'var(--cyan-400)', textDecoration: 'none' }}>📞 {f.phone}</a>}
+                    </div>
+                  </div>
+                );
+              })}
+              <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textAlign: 'center', marginTop: 8 }}>
+                {emergencyFacilities.length} facilities found · Data from OpenStreetMap via Overpass API
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      {confirmModal.isOpen && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(6,10,18,0.85)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 99999,
+          padding: 24
+        }}>
+          <div className="card p-6" style={{
+            width: '100%',
+            maxWidth: 400,
+            background: 'rgba(18,29,40,0.95)',
+            border: '1px solid var(--border-default, rgba(120,150,175,0.3))',
+            boxShadow: 'var(--shadow-xl), 0 0 30px rgba(239,68,68,0.1)',
+            borderRadius: 'var(--r-lg)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 16
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{
+                width: 40, height: 40, borderRadius: '50%',
+                background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
+                display: 'flex', alignItems: 'center',
+                justifyContent: 'center', flexShrink: 0
+              }}>
+                <AlertTriangle size={20} color="var(--red-400)" />
+              </div>
+              <div style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--text-primary)' }}>
+                {confirmModal.title}
+              </div>
+            </div>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              {confirmModal.message}
+            </div>
+            {confirmModal.type === 'safe' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  Attach Safety Verification Photos (Optional)
+                </label>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {safePhotos.map((p, idx) => (
+                    <div key={idx} style={{ position: 'relative', width: 60, height: 60, borderRadius: 'var(--r-sm)', overflow: 'hidden', border: '1px solid var(--border-dim)' }}>
+                      <img src={p} alt="Safety status" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <button
+                        onClick={() => setSafePhotos(prev => prev.filter((_, i) => i !== idx))}
+                        style={{ position: 'absolute', top: 2, right: 2, background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                      >
+                        <X size={8} color="white" />
+                      </button>
+                    </div>
+                  ))}
+                  {safePhotos.length < 3 && (
+                    <label style={{
+                      width: 60, height: 60, borderRadius: 'var(--r-sm)', border: '1px dashed var(--border-dim)',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                      background: 'rgba(255,255,255,0.02)', transition: 'all 0.15s'
+                    }}>
+                      <Camera size={14} color="var(--text-muted)" />
+                      <span style={{ fontSize: '0.5rem', color: 'var(--text-muted)', marginTop: 2 }}>Add photo</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        style={{ display: 'none' }}
+                        onChange={(e) => {
+                          const files = Array.from(e.target.files);
+                          files.forEach(file => {
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                              setSafePhotos(prev => {
+                                if (prev.length >= 3) return prev;
+                                return [...prev, reader.result];
+                              });
+                            };
+                            reader.readAsDataURL(file);
+                          });
+                        }}
+                      />
+                    </label>
+                  )}
                 </div>
               </div>
-            );
-          })}
+            )}
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 8 }}>
+              <button
+                className="btn btn-ghost"
+                onClick={() => {
+                  setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                  setSafePhotos([]);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-danger"
+                onClick={async () => {
+                  setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                  if (confirmModal.type === 'cancel') {
+                    await submitCancelSOS();
+                  } else if (confirmModal.type === 'safe') {
+                    await submitSafeCheck();
+                  }
+                }}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

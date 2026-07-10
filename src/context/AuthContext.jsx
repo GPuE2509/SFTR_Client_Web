@@ -53,19 +53,12 @@ export function AuthProvider({ children }) {
           if (u.avatar_url) {
             setAvatarUrl(u.avatar_url);
           }
+          if (response.activeWorkshopName) {
+            setWorkshopName(response.activeWorkshopName);
+          }
           if (u.role) {
             const lowRole = u.role.toLowerCase();
             setRole(lowRole);
-            if (lowRole === 'workshop') {
-              try {
-                const wsRes = await apiService.get('/workshops/me');
-                if (wsRes && wsRes.workshop) {
-                  setWorkshopName(wsRes.workshop.name);
-                }
-              } catch (wsErr) {
-                console.error('Failed to fetch workshop profile in AuthContext:', wsErr);
-              }
-            }
           }
         }
       } catch (e) {
@@ -82,10 +75,7 @@ export function AuthProvider({ children }) {
   ]);
 
   // Mechanic linkage requests queue
-  const [linkRequests, setLinkRequests] = useState([
-    { id: 'lnk-1', userName: "Tran Van Binh", requestedShop: "Minh Chau Garage", status: 'pending', date: '2026-05-31 10:15' },
-    { id: 'lnk-2', userName: "Nguyen Van Minh", requestedShop: "Minh Chau Garage", status: 'pending', date: '2026-05-31 11:30' },
-  ]);
+  const [linkRequests, setLinkRequests] = useState([]);
 
   // Handle register callback
   const login = (roleType, name, shop = null, avatar = '') => {
@@ -116,7 +106,7 @@ export function AuthProvider({ children }) {
       if (hasToken) {
         // dynamic import or fetch here since the user removed apiService import
         // using fetch directly to avoid import issues
-        await fetch('https://sftr-api.onrender.com/api/auth/logout', { 
+        await fetch('http://localhost:5000/api/auth/logout', { 
           method: 'POST', 
           headers: { 
             'Authorization': `Bearer ${hasToken}`,

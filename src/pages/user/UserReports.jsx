@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Camera, MapPin, Upload, CheckCircle, XCircle,
   Search, Bot, ThumbsUp, ThumbsDown, FileText,
@@ -38,6 +39,8 @@ const REPORT_TYPES = [
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function UserReports() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('submit');
   const [reportType, setReportType] = useState('flood');
   const [form, setForm] = useState({ location: '', description: '', severity: 'medium', consent: false });
@@ -54,7 +57,53 @@ export default function UserReports() {
   const [errors, setErrors] = useState({});
   const [pageMy, setPageMy] = useState(1);
   const [pageVerify, setPageVerify] = useState(1);
+  const [durationHours, setDurationHours] = useState(1);
+  const [votePhotos, setVotePhotos] = useState([]);
   const fileInputRef = useRef(null);
+  const voteFileInputRef = useRef(null);
+
+  React.useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const tab = location.state?.tab || params.get('tab');
+    const reportId = location.state?.reportId || params.get('reportId');
+    if (tab) {
+      setActiveTab(tab);
+    }
+    if (reportId && reports.length > 0) {
+      const match = reports.find(r => r._id === reportId || r.id === reportId);
+      if (match) {
+        setSelectedReport(match);
+        // Find which page this report is on
+        const isApproved = (r) => r.moderation_status === 'Approved' || r.status === 'approved';
+        const verifyList = reports.filter(isApproved).filter(r =>
+          r.title?.toLowerCase().includes(searchVerify.toLowerCase()) ||
+          r.description?.toLowerCase().includes(searchVerify.toLowerCase())
+        );
+        const index = verifyList.findIndex(r => r._id === reportId || r.id === reportId);
+        if (index !== -1) {
+          const page = Math.floor(index / 5) + 1;
+          setPageVerify(page);
+        }
+
+        // Scroll to card
+        setTimeout(() => {
+          const element = document.getElementById(`report-card-${reportId}`);
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            element.style.boxShadow = '0 0 15px var(--cyan-400)';
+            setTimeout(() => {
+              element.style.boxShadow = '';
+            }, 3000);
+          }
+        }, 500);
+
+        // Clear location state to prevent re-triggering on reports refresh
+        if (location.state?.reportId || params.get('reportId')) {
+          navigate(location.pathname, { replace: true, state: {} });
+        }
+      }
+    }
+  }, [location, reports, searchVerify, navigate]);
 
   React.useEffect(() => {
     fetchReports();
@@ -66,7 +115,7 @@ export default function UserReports() {
 
   const fetchReports = async () => {
     try {
-      const res = await fetch('https://sftr-api.onrender.com/api/incident-reports');
+      const res = await fetch('http://localhost:5000/api/incident-reports');
       const data = await res.json();
       if (data.success) {
         setReports(data.data);
@@ -151,6 +200,22 @@ export default function UserReports() {
     setImages(prev => prev.filter((_, i) => i !== index));
   };
 
+  const handleVotePhotoUpload = async (e) => {
+    const files = Array.from(e.target.files);
+    if (files.length > 0) {
+      const newPhotos = [];
+      for (const f of files) {
+        const reader = new FileReader();
+        const base64 = await new Promise((resolve) => {
+          reader.onload = () => resolve(reader.result);
+          reader.readAsDataURL(f);
+        });
+        newPhotos.push(base64);
+      }
+      setVotePhotos(prev => [...prev, ...newPhotos]);
+    }
+  };
+
   const aiScore = Math.min(85, Math.max(15, 20 + Math.round(form.description.length / 5) + images.length * 5));
 
   const getUserIdFromToken = () => {
@@ -195,10 +260,11 @@ export default function UserReports() {
         lat: gps?.lat || null,
         report_type: reportType,
         ai_confidence_score: aiScore / 100,
-        is_approved_by_ai: aiScore >= 50
+        is_approved_by_ai: aiScore >= 50,
+        duration_hours: durationHours,
       };
 
-      const res = await fetch('https://sftr-api.onrender.com/api/incident-reports', {
+      const res = await fetch('http://localhost:5000/api/incident-reports', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -233,11 +299,9 @@ export default function UserReports() {
   const vote = async (reportId, type) => {
     let userId = getUserIdFromToken();
     if (!userId) {
-      userId = localStorage.getItem('guest_id');
-      if (!userId) {
-        userId = 'guest_' + Math.random().toString(36).substr(2, 9);
-        localStorage.setItem('guest_id', userId);
-      }
+      setToast({ type: 'error', message: 'You need to log in to verify a report.' });
+      setTimeout(() => setToast(null), 5000);
+      return;
     }
     
     const storageKey = `my_reports_${userId}`;
@@ -246,29 +310,40 @@ export default function UserReports() {
     
     const report = reports.find(r => r._id === reportId);
     
-    if (myReports.includes(reportId) || legacyReports.includes(reportId) || (report && report.reporter_id === userId && userId !== 'guest')) {
-      setToast({ type: 'error', message: 'You cannot verify your own report!' });
-      setTimeout(() => setToast(null), 5000);
-      return;
-    }
-
+    const isCreator = myReports.includes(reportId) || legacyReports.includes(reportId) || (report && report.reporter_id === userId && userId !== 'guest');
+    
+    // UI already restricts creator actions. Allow the vote call to proceed.
+    
     const prevVote = votes[reportId] || null;
     const newVoteType = prevVote === type ? null : type;
 
+    const payload = { vote_type: newVoteType, previous_vote: prevVote, user_id: userId };
+    if (votePhotos.length > 0 && newVoteType !== null) {
+      payload.photo_urls = votePhotos;
+    }
+
     try {
-      const res = await fetch(`https://sftr-api.onrender.com/api/incident-reports/${reportId}/vote`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ vote_type: newVoteType, previous_vote: prevVote, user_id: userId })
-      });
-      const data = await res.json();
-      if (data.success) {
-        setVotes(prev => ({ ...prev, [reportId]: newVoteType }));
-        setReports(prev => prev.map(r => r._id === reportId ? data.data : r));
-        if (selectedReport && selectedReport._id === reportId) setSelectedReport(data.data);
+      const res = await apiService.post(`/incident-reports/${reportId}/vote`, payload);
+      if (res.success && res.data) {
+        setVotePhotos([]);
+        if (res.data.lifecycle_status === 'Archived') {
+          setReports(prev => prev.filter(r => r._id !== reportId));
+          setToast({ type: 'success', message: 'Report has been archived due to community votes.' });
+        } else {
+          setVotes(prev => ({ ...prev, [reportId]: newVoteType }));
+          setReports(prev => prev.map(r => r._id === reportId ? res.data : r));
+          if (selectedReport && selectedReport._id === reportId) setSelectedReport(res.data);
+          setToast({ type: 'success', message: 'Verification recorded successfully!' });
+        }
+        setTimeout(() => setToast(null), 5000);
+      } else {
+        setToast({ type: 'error', message: res?.message || 'Failed to submit verification.' });
+        setTimeout(() => setToast(null), 5000);
       }
     } catch (err) {
       console.error(err);
+      setToast({ type: 'error', message: 'An error occurred while voting.' });
+      setTimeout(() => setToast(null), 5000);
     }
   };
 
@@ -276,10 +351,11 @@ export default function UserReports() {
     pending: <span className="badge badge-orange">Waiting for approval</span>,
     approved: <span className="badge badge-green">Approved</span>,
     rejected: <span className="badge badge-red">Refuse</span>,
+    archived: <span className="badge" style={{ background: 'var(--bg-elevated)', color: 'var(--text-muted)' }}>Closed</span>,
   };
 
   const filteredVerify = reports.filter(r => {
-    const isApproved = r.moderation_status === 'Approved' || r.status === 'approved';
+    const isApproved = (r.moderation_status === 'Approved' || r.status === 'approved') && r.lifecycle_status !== 'Archived';
     return isApproved;
   }).filter(r =>
     r.title?.toLowerCase().includes(searchVerify.toLowerCase()) ||
@@ -411,6 +487,38 @@ export default function UserReports() {
               />
               {errors.description && <div style={{ color: 'var(--red-400)', fontSize: '0.75rem', marginTop: -6 }}>* {errors.description}</div>}
 
+              {/* Duration picker */}
+              <div style={{ marginTop: 4 }}>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Clock size={12} /> Estimated duration of incident
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {[
+                    { val: 1,   label: '1 hour' },
+                    { val: 3,   label: '3 hours' },
+                    { val: 6,   label: '6 hours' },
+                    { val: 12,  label: '12 hours' },
+                    { val: 16 / 60, label: '16 min (test)' },
+                  ].map(d => (
+                    <button
+                      key={d.val}
+                      type="button"
+                      onClick={() => setDurationHours(d.val)}
+                      style={{
+                        padding: '4px 12px', borderRadius: 99, fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer',
+                        border: `1px solid ${durationHours === d.val ? 'var(--orange-400)' : 'var(--border-dim)'}`,
+                        background: durationHours === d.val ? 'rgba(251,146,60,0.15)' : 'transparent',
+                        color: durationHours === d.val ? 'var(--orange-400)' : 'var(--text-muted)',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      {d.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <select
                   className="input"
@@ -428,6 +536,7 @@ export default function UserReports() {
                 <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={(e) => { handleImageUpload(e); setErrors(p => ({ ...p, images: null })); }} style={{ display: 'none' }} />
                 {images.length > 0 && <span style={{ fontSize: '0.72rem', color: 'var(--cyan-400)', fontWeight: 600 }}>{images.length} image</span>}
               </div>
+
               {errors.images && <div style={{ color: 'var(--red-400)', fontSize: '0.75rem', marginTop: -6 }}>* {errors.images}</div>}
 
               {/* Image previews */}
@@ -543,9 +652,12 @@ export default function UserReports() {
             paginatedMy.map(report => {
               const parsedImages = report.images ? JSON.parse(report.images) : [];
               const typeCfg = REPORT_TYPES.find(t => t.id === report.report_type) || REPORT_TYPES[0];
-              const statusKey = report.moderation_status?.toLowerCase() || 'pending';
+              let statusKey = report.moderation_status?.toLowerCase() || 'pending';
+              if (report.lifecycle_status === 'Archived') {
+                statusKey = 'archived';
+              }
               return (
-                <div key={report._id} className="card" style={{ padding: '16px 20px', borderLeft: `3px solid ${typeCfg.color}`, cursor: 'pointer' }} onClick={() => setSelectedReport(report)}>
+                <div key={report._id} className="card" style={{ padding: '16px 20px', borderLeft: `3px solid ${typeCfg.color}`, cursor: 'pointer', opacity: report.lifecycle_status === 'Archived' ? 0.6 : 1 }} onClick={() => setSelectedReport(report)}>
                   <div className="flex items-start justify-between gap-4">
                     <div style={{ flex: 1 }}>
                       <div className="flex items-center gap-3" style={{ marginBottom: 6, flexWrap: 'wrap' }}>
@@ -617,7 +729,7 @@ export default function UserReports() {
               const confirmPct = totalVotes > 0 ? Math.round((confirmCount / totalVotes) * 100) : 0;
 
               return (
-                <div key={report._id} className="card" style={{ padding: '16px 20px', borderLeft: `3px solid ${myVote ? (myVote === 'confirm' ? 'var(--green-400)' : 'var(--red-400)') : 'var(--orange-400)'}`, cursor: 'pointer' }} onClick={() => setSelectedReport(report)}>
+                <div id={`report-card-${report._id}`} key={report._id} className="card" style={{ padding: '16px 20px', borderLeft: `3px solid ${myVote ? (myVote === 'confirm' ? 'var(--green-400)' : 'var(--red-400)') : 'var(--orange-400)'}`, cursor: 'pointer' }} onClick={() => setSelectedReport(report)}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
                     <div style={{ flex: 1 }}>
                       <div className="flex items-center gap-3" style={{ marginBottom: 6, flexWrap: 'wrap' }}>
@@ -695,11 +807,11 @@ export default function UserReports() {
         </div>
       )}
 
-      {/* Top Right Toast Notification */}
+      {/* Bottom Right Toast Notification */}
       {toast && (
         <div style={{
           position: 'fixed',
-          top: 80, // Accounts for top navbar if any
+          bottom: 24,
           right: 24,
           zIndex: 9999,
           background: toast.type === 'success' ? 'var(--green-400)' : 'var(--red-400)',
@@ -732,6 +844,11 @@ export default function UserReports() {
             <div style={{ padding: 20, overflowY: 'auto' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
                 <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{selectedReport._id.slice(-6).toUpperCase()}</span>
+                {(() => {
+                  let statusKey = selectedReport.moderation_status?.toLowerCase() || 'pending';
+                  if (selectedReport.lifecycle_status === 'Archived') statusKey = 'archived';
+                  return statusBadge[statusKey] || statusBadge.pending;
+                })()}
                 <AiScoreBadge score={selectedReport.ai_confidence_score ? Math.round(selectedReport.ai_confidence_score * 100) : 0} />
               </div>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 8 }}>
@@ -751,6 +868,114 @@ export default function UserReports() {
                   </div>
                 </div>
               )}
+
+              {(() => {
+                const proofUrls = [];
+                if (selectedReport.voters && selectedReport.voters.length > 0) {
+                  selectedReport.voters.forEach(v => {
+                    if (v.photo_url) {
+                      try {
+                        const parsed = JSON.parse(v.photo_url);
+                        if (Array.isArray(parsed)) {
+                          proofUrls.push(...parsed);
+                        } else {
+                          proofUrls.push(v.photo_url);
+                        }
+                      } catch (e) {
+                        proofUrls.push(v.photo_url);
+                      }
+                    }
+                  });
+                }
+                if (proofUrls.length > 0) {
+                  return (
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: 8, color: 'var(--text-primary)' }}>Community Proofs</div>
+                      <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 8 }}>
+                        {proofUrls.map((url, i) => (
+                          <img key={`proof-${i}`} src={url} alt={`proof-${i}`} onClick={(e) => { e.stopPropagation(); setFullscreenImage(url); }} style={{ width: 100, height: 100, objectFit: 'cover', borderRadius: 8, flexShrink: 0, border: '1px solid var(--border-dim)', cursor: 'zoom-in' }} />
+                        ))}
+                      </div>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+              
+              {/* Vote Actions in Modal */}
+              <div style={{ padding: '16px 0', borderTop: '1px solid var(--border-dim)', marginTop: 16 }}>
+                {(() => {
+                  const isCreator = selectedReport.reporter_id && (selectedReport.reporter_id._id === currentUserId || selectedReport.reporter_id === currentUserId);
+                  return (
+                    <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 12 }}>
+                      {isCreator ? "Extend your report" : "Verify this report"}
+                    </div>
+                  );
+                })()}
+                
+                {votePhotos.length > 0 && (
+                  <div style={{ display: 'flex', gap: 8, overflowX: 'auto', marginBottom: 12, paddingBottom: 4 }}>
+                    {votePhotos.map((photo, i) => (
+                      <div key={i} style={{ position: 'relative', width: 80, height: 80, flexShrink: 0 }}>
+                        <img src={photo} alt={`Proof ${i}`} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8, border: '1px solid var(--border-dim)' }} />
+                        <button onClick={() => setVotePhotos(prev => prev.filter((_, idx) => idx !== i))} style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: 'var(--red-400)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <X size={12} color="white" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                  {(() => {
+                    const isCreator = selectedReport.reporter_id && (selectedReport.reporter_id._id === currentUserId || selectedReport.reporter_id === currentUserId);
+                    if (isCreator) {
+                      return (
+                        <>
+                          {votePhotos.length > 0 ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              <button className="btn btn-sm btn-primary" onClick={() => vote(selectedReport._id, 'confirm')} style={{ width: 'fit-content' }}>
+                                <CheckCircle size={14} /> Save & Send Proof
+                              </button>
+                              <span style={{ fontSize: '0.75rem', color: 'var(--orange-400)' }}>
+                                * Photos cannot be edited after submission.
+                              </span>
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                              Attach proof to extend your report.
+                            </div>
+                          )}
+                        </>
+                      );
+                    }
+                    return (
+                      <>
+                        <button className={`btn btn-sm ${votes[selectedReport._id] === 'confirm' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => vote(selectedReport._id, 'confirm')}>
+                          <ThumbsUp size={14} /> Still exists
+                        </button>
+                        <button className={`btn btn-sm ${votes[selectedReport._id] === 'deny' ? 'btn-danger' : 'btn-ghost'}`} onClick={() => vote(selectedReport._id, 'deny')}>
+                          <ThumbsDown size={14} /> No more
+                        </button>
+                        <button className={`btn btn-sm ${votes[selectedReport._id] === 'false' ? 'btn-danger' : 'btn-ghost'}`} onClick={() => vote(selectedReport._id, 'false')}>
+                          <AlertTriangle size={14} /> Wrong report
+                        </button>
+                      </>
+                    );
+                  })()}
+                  
+                  <div style={{ flex: 1 }}></div>
+                  
+                  {selectedReport.expiredAt && (new Date(selectedReport.expiredAt).getTime() - Date.now() <= 30 * 60 * 1000) && (new Date(selectedReport.expiredAt).getTime() > Date.now()) && (
+                    <>
+                      <button className="btn btn-sm btn-ghost" onClick={() => voteFileInputRef.current?.click()} style={{ color: 'var(--cyan-400)' }}>
+                        <Camera size={14} /> Attach Proof
+                      </button>
+                      <input ref={voteFileInputRef} type="file" accept="image/*" multiple onChange={handleVotePhotoUpload} style={{ display: 'none' }} />
+                    </>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>

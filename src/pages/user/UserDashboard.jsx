@@ -4,6 +4,7 @@ import { MapPin, ShieldAlert, CloudRain, Clock, AlertTriangle, Search,
   Layers, Plus, Trash2, Route, Wrench, Star, Phone, Navigation,
   X, ThumbsUp, ChevronDown, ChevronUp, Eye,
 } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import LiveMap from '../../components/common/LiveMap';
 import WeatherBanner from '../../components/weather/WeatherBanner';
 import DeviceDetailPanel from '../../components/common/DeviceDetailPanel';
@@ -13,21 +14,11 @@ import { apiService } from '../../services/apiService';
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const getWaterLevelBadge = (level, status, systemConfig, calib_empty_cm) => {
-  if (status === 'offline' || status === 'error')
-    return { label: "Lost connection", className: 'badge-gray', color: 'var(--text-muted)', mapColor: '#475569' };
-  
-  const calib = calib_empty_cm || 100;
-  const pct = (level / calib) * 100;
-  const l1 = systemConfig?.water_level_l1 ?? 20;
-  const l2 = systemConfig?.water_level_l2 ?? 40;
-  const l3 = systemConfig?.water_level_l3 ?? 50;
-  const l4 = systemConfig?.water_level_l4 ?? 60;
-
-  if (pct >= l4) return { label: "Critical flooding", className: 'badge-purple', color: 'var(--purple-400)', mapColor: '#a855f7' };
-  if (pct >= l3) return { label: "Severe flooding", className: 'badge-red', color: 'var(--red-400)', mapColor: '#ef4444' };
-  if (pct >= l2) return { label: "Moderate flooding", className: 'badge-orange', color: 'var(--orange-400)', mapColor: '#f97316' };
-  if (pct >= l1) return { label: "Slight flooding", className: 'badge-gold', color: 'var(--gold-400)', mapColor: '#eab308' };
-  return { label: "Safe", className: 'badge-green', color: 'var(--green-400)', mapColor: '#22c55e' };
+  const current = level || 0;
+  if (current > 5) {
+    return { label: `${Math.round(current * 10) / 10} cm`, className: 'badge-green', color: 'var(--green-400)', mapColor: '#22c55e' };
+  }
+  return { label: "No water", className: 'badge-gray', color: 'var(--text-muted)', mapColor: '#64748b' };
 };
 
 function collapsedLabel(status) {
@@ -84,12 +75,55 @@ export default function UserDashboard({ role = 'user', workshopName = null, onNa
   const [searchQuery, setSearchQuery]   = useState('');
   const [devices, setDevices]           = useState(mockDevices);
   const [selectedSensor, setSelectedSensor] = useState(mockDevices[0]);
-  const [zones, setZones]               = useState(initZones);
+  const [zones, setZones]               = useState([]);
   const [showAddZone, setShowAddZone]   = useState(false);
-  const [newZone, setNewZone]           = useState({ name: '', address: '', radius: 2, level: 'medium' });
+  const [newZone, setNewZone]           = useState({ name: '', address: '', radius: 2, level: 'medium', lat: null, lng: null });
   const [activeNavRoute, setActiveNavRoute] = useState(null);
   const [detailDeviceId, setDetailDeviceId] = useState(null);
   const [systemConfig, setSystemConfig] = useState(null);
+  const [focusWorkshopId, setFocusWorkshopId] = useState(null);
+  const location = useLocation();
+
+  useEffect(() => {
+    if (location.state?.pinWorkshopId) {
+      setFocusWorkshopId(location.state.pinWorkshopId);
+      // Optional: Clear state after handling it so it doesn't trigger again on reload
+      window.history.replaceState({}, '');
+    }
+  }, [location.state]);
+
+  const fetchZones = async () => {
+    try {
+      const res = await apiService.get('/warning-zones');
+      if (res && res.success && res.data && res.data.length > 0) {
+        const formatted = res.data.map(z => ({
+          id: z._id,
+          name: z.zone_name,
+          radius: (z.radius_meters || 2000) / 1000,
+          level: z.level || 'medium',
+          active: z.is_active,
+          address: z.address || 'Custom Coordinates',
+          lat: z.location?.coordinates ? z.location.coordinates[1] : 10.03711,
+          lng: z.location?.coordinates ? z.location.coordinates[0] : 105.78825
+        }));
+        setZones(formatted);
+      } else {
+        setZones(initZones);
+      }
+    } catch (err) {
+      console.error('Failed to load warning zones from backend:', err);
+      setZones(initZones);
+    }
+  };
+
+  useEffect(() => {
+    const token = sessionStorage.getItem('auth_token') || localStorage.getItem('auth_token');
+    if (token) {
+      fetchZones();
+    } else {
+      setZones(initZones);
+    }
+  }, []);
 
   useEffect(() => {
     const fetchConfig = async () => {
@@ -136,12 +170,69 @@ export default function UserDashboard({ role = 'user', workshopName = null, onNa
     (d.id || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const updateZone = (id, changes) => setZones(prev => prev.map(z => z.id === id ? { ...z, ...changes } : z));
-  const removeZone = (id) => setZones(prev => prev.filter(z => z.id !== id));
-  const addZone = () => {
+  const updateZone = async (id, changes) => {
+    const current = zones.find(z => z.id === id);
+    if (!current) return;
+
+    const payload = {};
+    if (changes.name !== undefined) payload.zone_name = changes.name;
+    if (changes.active !== undefined) payload.is_active = changes.active;
+    if (changes.radius !== undefined) payload.radius_meters = changes.radius * 1000;
+    if (changes.level !== undefined) payload.level = changes.level;
+
+    try {
+      const res = await apiService.put(`/warning-zones/${id}`, payload);
+      if (res && res.success) {
+        fetchZones();
+      }
+    } catch (err) {
+      console.error('Failed to update warning zone:', err);
+    }
+  };
+
+  const removeZone = async (id) => {
+    try {
+      const res = await apiService.delete(`/warning-zones/${id}`);
+      if (res && res.success) {
+        fetchZones();
+      }
+    } catch (err) {
+      console.error('Failed to delete warning zone:', err);
+    }
+  };
+
+  const handleMapClick = (latlng) => {
+    setNewZone(prev => ({
+      ...prev,
+      lat: latlng.lat,
+      lng: latlng.lng,
+      address: `Coordinates: ${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}`
+    }));
+  };
+
+  const addZone = async () => {
     if (!newZone.name) return;
-    setZones(prev => [...prev, { id: `z${Date.now()}`, ...newZone, active: true, lat: 10.03711 + (Math.random() - 0.5) * 0.1, lng: 105.78825 + (Math.random() - 0.5) * 0.1 }]);
-    setNewZone({ name: '', address: '', radius: 2, level: 'medium' });
+    const lat = newZone.lat !== null ? newZone.lat : 10.03711 + (Math.random() - 0.5) * 0.1;
+    const lng = newZone.lng !== null ? newZone.lng : 105.78825 + (Math.random() - 0.5) * 0.1;
+    const radius_meters = (newZone.radius || 2) * 1000;
+
+    try {
+      const res = await apiService.post('/warning-zones', {
+        zone_name: newZone.name,
+        lat,
+        lng,
+        radius_meters,
+        address: newZone.address || `Coordinates: ${lat.toFixed(5)}, ${lng.toFixed(5)}`,
+        is_active: true
+      });
+      if (res && res.success) {
+        fetchZones();
+      }
+    } catch (err) {
+      console.error('Failed to create warning zone:', err);
+    }
+
+    setNewZone({ name: '', address: '', radius: 2, level: 'medium', lat: null, lng: null });
     setShowAddZone(false);
   };
 
@@ -152,8 +243,8 @@ export default function UserDashboard({ role = 'user', workshopName = null, onNa
       <WeatherBanner />
 
       {/* ── BẢN ĐỒ NGẬP LỤT — full-width, 1 hàng riêng ── */}
-      <div className="card" style={{ display: 'flex', flexDirection: 'column', height: 520, overflow: 'hidden', marginBottom: 20, position: 'relative' }}>
-        <LiveMap height={520} hideWrapper onNavigate={onNavigate} onClickDetail={(device) => setDetailDeviceId(device.id || device.device_code)}>
+      <div className="card" style={{ display: 'flex', flexDirection: 'column', height: 620, overflow: 'hidden', marginBottom: 20, position: 'relative' }}>
+        <LiveMap height={620} hideWrapper onNavigate={onNavigate} onMapClick={handleMapClick} onClickDetail={(device) => setDetailDeviceId(device.id || device.device_code)} focusWorkshopId={focusWorkshopId}>
           {detailDeviceId && <DeviceDetailPanel deviceId={detailDeviceId} onClose={() => setDetailDeviceId(null)} />}
         </LiveMap>
       </div>
@@ -224,75 +315,7 @@ export default function UserDashboard({ role = 'user', workshopName = null, onNa
         </div>
       </div>
 
-      {/* ── VÙNG CẢNH BÁO TÙY CHỈNH — full-width ── */}
-      <div className="card" style={{ overflow: 'hidden', marginBottom: 20 }}>
-        <div style={{ padding: '12px 18px', background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border-dim)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div className="flex items-center gap-2">
-            <Layers size={14} color="var(--orange-400)" />
-            <div className="section-title">Custom warning area (circle with radius)</div>
-          </div>
-          <button className="btn btn-primary btn-sm" onClick={() => setShowAddZone(p => !p)}>
-            <Plus size={12} /> Add region
-          </button>
-        </div>
-
-        {showAddZone && (
-          <div style={{ padding: '14px 18px', background: 'rgba(6,182,212,0.04)', borderBottom: '1px solid var(--border-dim)', display: 'grid', gridTemplateColumns: '1fr 1fr 0.7fr 0.7fr auto', gap: 10, alignItems: 'end' }}>
-            <div>
-              <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginBottom: 4 }}>Region name *</div>
-              <input className="input" placeholder="Example: Private house" value={newZone.name} onChange={e => setNewZone(p => ({ ...p, name: e.target.value }))} />
-            </div>
-            <div>
-              <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginBottom: 4 }}>Area</div>
-              <input className="input" placeholder="For example: District 12" value={newZone.address} onChange={e => setNewZone(p => ({ ...p, address: e.target.value }))} />
-            </div>
-            <div>
-              <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginBottom: 4 }}>Radius: <strong style={{ color: 'var(--cyan-400)' }}>{newZone.radius}km</strong></div>
-              <input type="range" min={1} max={10} value={newZone.radius} onChange={e => setNewZone(p => ({ ...p, radius: Number(e.target.value) }))} style={{ width: '100%', marginTop: 8 }} />
-            </div>
-            <div>
-              <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginBottom: 4 }}>Level</div>
-              <select className="input" value={newZone.level} onChange={e => setNewZone(p => ({ ...p, level: e.target.value }))} style={{ fontSize: '0.78rem' }}>
-                {ZONE_LEVELS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
-              </select>
-            </div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button className="btn btn-ghost btn-sm" onClick={() => setShowAddZone(false)}>Cancel</button>
-              <button className="btn btn-primary btn-sm" onClick={addZone}>Save</button>
-            </div>
-          </div>
-        )}
-
-        <div style={{ padding: '14px 18px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
-          {zones.map(z => (
-            <div key={z.id} style={{ padding: '12px 14px', borderRadius: 'var(--r-md)', border: `1px solid ${z.active ? levelColor[z.level] + '55' : 'var(--border-dim)'}`, background: z.active ? levelColor[z.level] + '06' : 'transparent', opacity: z.active ? 1 : 0.55 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--text-primary)' }}>{z.name}</span>
-                  <span className={`badge ${levelBadge[z.level]}`} style={{ fontSize: '0.58rem' }}>{ZONE_LEVELS.find(l => l.value === z.level)?.label}</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <label className="toggle">
-                    <input type="checkbox" checked={z.active} onChange={() => updateZone(z.id, { active: !z.active })} />
-                    <span className="toggle-slider" />
-                  </label>
-                  <button onClick={() => removeZone(z.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2 }}>
-                    <Trash2 size={13} color="var(--red-400)" />
-                  </button>
-                </div>
-              </div>
-              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 8 }}>{z.address}</div>
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', color: 'var(--text-muted)', marginBottom: 4 }}>
-                  <span>Radius</span>
-                  <strong style={{ color: levelColor[z.level] }}>{z.radius} km</strong>
-                </div>
-                <input type="range" min={1} max={10} value={z.radius} onChange={e => updateZone(z.id, { radius: Number(e.target.value) })} style={{ width: '100%' }} />
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+      {/* Warning Zones are managed directly inside the map sidebar panel */}
 
       {/* Removed 'Điều hướng an toàn' navigation suggestions per request */}
 

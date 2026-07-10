@@ -4,8 +4,37 @@ import { MapContainer, TileLayer, Marker, useMap, ZoomControl } from 'react-leaf
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { apiService } from '../../services/apiService';
+import GoongMaplibreLayer from '../../components/common/GoongMaplibreLayer';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+const getWorkingHoursForToday = (w) => {
+  if (!w) return 'Closed';
+  if (w.is_open === false || w.status === 'closed' || w.status === 'Closed' || w.status === 'busy') {
+    return 'Closed';
+  }
+  const defaultHours = `${w.open_time || w.openTime || '08:00'} – ${w.close_time || w.closeTime || '17:00'}`;
+  
+  if (!w.weekly_calendar && !w.weeklyCalendar) return defaultHours;
+  const calendar = w.weekly_calendar || w.weeklyCalendar;
+  if (!calendar || calendar.length === 0) return defaultHours;
+
+  const hasActiveCalendar = calendar.some(day => day.is_active);
+  if (!hasActiveCalendar) return defaultHours;
+
+  const day = new Date().getDay();
+  let dayGroup = "";
+  if (day === 0) {
+    dayGroup = "Sunday";
+  } else if (day === 6) {
+    dayGroup = "Saturday";
+  } else {
+    dayGroup = "Monday – Friday";
+  }
+  const entry = calendar.find(c => c.day_group === dayGroup);
+  if (!entry) return defaultHours;
+  if (!entry.is_active) return 'Closed';
+  return `${entry.open_time} – ${entry.close_time}`;
+};
 
 function getDistance(lat1, lon1, lat2, lon2) {
   if (!lat1 || !lon1 || !lat2 || !lon2) return null;
@@ -76,10 +105,7 @@ function WorkshopMap({ workshops, selected, onSelect, userLocation }) {
       `}</style>
       <MapContainer center={mapCenter} zoom={14} style={{ width: '100%', height: '100%' }} zoomControl={false}>
         <ZoomControl position="bottomright" />
-        <TileLayer
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        />
+        <GoongMaplibreLayer apiKey="S6RMPleSOa7QXQgi5byo4rewtt9pRnwzzHjetKjf" />
         <MapFlyToTarget target={selected} />
 
         {/* User position */}
@@ -238,6 +264,7 @@ export default function UserWorkshops({ onNavigate }) {
           const latNum = parseFloat(w.lat);
           const lngNum = parseFloat(w.lng);
           const distanceVal = getDistance(loc.lat, loc.lng, latNum, lngNum);
+          
           return {
             ...w,
             lat: isNaN(latNum) ? 10.03711 : latNum,
@@ -246,7 +273,7 @@ export default function UserWorkshops({ onNavigate }) {
             rating: w.rating_average || 0,
             reviews: w.rating_count || 0,
             status: w.is_open ? 'open' : 'busy',
-            hours: '07:30 – 21:00', // Default working hours
+            hours: getWorkingHoursForToday(w),
             distanceVal: distanceVal,
             dist: distanceVal !== null ? `${distanceVal.toFixed(1)} km` : 'N/A'
           };
@@ -544,7 +571,7 @@ export default function UserWorkshops({ onNavigate }) {
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                   <Clock size={15} color="var(--text-muted)" style={{ flexShrink: 0 }} />
-                  <div>Operating Hours: {selectedWs.hours}</div>
+                  <div>Operating Hours: {getWorkingHoursForToday(selectedWs)}</div>
                 </div>
               </div>
 

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   LayoutDashboard, FileText, Settings, Users,
   MessageSquare, HeadphonesIcon, ChevronLeft, ChevronRight,
-  Waves, Shield, Activity, AlertTriangle, ClipboardList, Bell,
+  Waves, Shield, Activity, AlertTriangle, ClipboardList, Bell, Cpu
 } from 'lucide-react';
 
 const navItems = [
@@ -24,6 +24,7 @@ const navItems = [
     section: "ADMINISTRATION",
     items: [
       { id: 'user-management', label: "Accounts & Devices", icon: Users, badge: 2 },
+      { id: 'iot-management', label: "IoT Devices", icon: Cpu, badge: null },
       { id: 'system-config', label: "System Configuration", icon: Settings, badge: null },
       { id: 'manager-ops', label: "Diary & Bonus Points", icon: ClipboardList, badge: 3 },
     ],
@@ -44,7 +45,7 @@ export default function ManagerSidebar({ activePage, onNavigate, collapsed, onTo
   const [pendingReports, setPendingReports] = useState(0);
 
   useEffect(() => {
-    fetch('https://sftr-api.onrender.com/api/incident-reports')
+    fetch('http://localhost:5000/api/incident-reports')
       .then(res => res.json())
       .then(data => {
         if (data.success) {

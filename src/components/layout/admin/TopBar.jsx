@@ -27,6 +27,21 @@ const tickerItems = [
 
 export default function TopBar({ activePage, collapsed, onOpenProfile, onNavigate, userName = 'Admin', avatarUrl = '' }) {
   const [time, setTime] = useState(new Date());
+  const [unreadCount, setUnreadCount] = useState(() => {
+    const cached = localStorage.getItem('total_unread_count');
+    return cached ? parseInt(cached, 10) : 0;
+  });
+
+  useEffect(() => {
+    const handleUpdate = (e) => {
+      if (e.detail && typeof e.detail.count === 'number') {
+        setUnreadCount(e.detail.count);
+      }
+    };
+    window.addEventListener('unread-count-changed', handleUpdate);
+    return () => window.removeEventListener('unread-count-changed', handleUpdate);
+  }, []);
+
   const pageInfo = pageTitles[activePage] || pageTitles['dashboard'];
 
   const avatarInitial = userName ? userName.slice(0, 2).toUpperCase() : 'AD';
@@ -123,7 +138,7 @@ export default function TopBar({ activePage, collapsed, onOpenProfile, onNavigat
             onClick={() => onNavigate && onNavigate('admin-notifications')}
           >
             <Bell size={15} />
-            <span className="notif-badge">7</span>
+            {unreadCount > 0 && <span className="notif-badge">{unreadCount}</span>}
           </button>
           <button className="topbar-btn" title="Setting">
             <Settings size={15} />

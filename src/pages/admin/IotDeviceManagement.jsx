@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Search, Cpu, Battery, AlertTriangle, X, PowerOff, Edit, Upload, Power
+  Search, Cpu, Battery, AlertTriangle, X, PowerOff, Edit, Upload, Power, Activity
 } from 'lucide-react';
 import { apiService } from '../../services/apiService';
+import DeviceLifecycleModal from '../../components/common/DeviceLifecycleModal';
 
 function ConfirmModal({ title, message, onConfirm, onCancel, variant = 'danger' }) {
   return (
@@ -29,10 +30,10 @@ function ConfirmModal({ title, message, onConfirm, onCancel, variant = 'danger' 
 
 function FloodWarningBadge({ level, warn, danger }) {
   const current = level || 0;
-  if (danger && current >= danger) return <span className="badge badge-red"><span style={{ width: 6, height: 6, background: 'var(--red-400)', borderRadius: '50%' }} /> Severe Flooding</span>;
-  if (warn && current >= warn) return <span className="badge badge-orange"><span style={{ width: 6, height: 6, background: 'var(--orange-400)', borderRadius: '50%' }} /> Moderate Flooding</span>;
-  if (current > 0) return <span className="badge badge-cyan"><span style={{ width: 6, height: 6, background: 'var(--cyan-400)', borderRadius: '50%' }} /> Slight Flooding</span>;
-  return <span className="badge badge-green"><span style={{ width: 6, height: 6, background: 'var(--green-400)', borderRadius: '50%' }} /> Safe</span>;
+  if (current > 5) {
+    return <span className="badge badge-green"><span style={{ width: 6, height: 6, background: 'var(--green-400)', borderRadius: '50%', display: 'inline-block' }} /> {Math.round(current * 10) / 10} cm</span>;
+  }
+  return <span className="badge badge-gray" style={{ color: 'var(--text-muted)' }}><span style={{ width: 6, height: 6, background: '#64748b', borderRadius: '50%', display: 'inline-block' }} /> No water</span>;
 }
 
 function AddDeviceModal({ onClose, onAdd }) {
@@ -318,19 +319,20 @@ function DeviceStatusBadge({ device }) {
       </span>
     );
   }
-  if (device.status === 'Online') {
-    return (
-      <span className="badge badge-green">
-        <span style={{ width: 6, height: 6, background: 'var(--green-400)', borderRadius: '50%', display: 'inline-block' }} />
-        {' '}Online
-      </span>
-    );
-  }
   if (device.status === 'Maintenance') {
     return (
       <span className="badge badge-orange">
         <span style={{ width: 6, height: 6, background: 'var(--orange-400)', borderRadius: '50%', display: 'inline-block' }} />
         {' '}Maintenance
+      </span>
+    );
+  }
+  const isOnline = (device.current_water_level || device.waterLevel || 0) > 5;
+  if (isOnline) {
+    return (
+      <span className="badge badge-green">
+        <span style={{ width: 6, height: 6, background: 'var(--green-400)', borderRadius: '50%', display: 'inline-block' }} />
+        {' '}Online
       </span>
     );
   }
@@ -350,11 +352,15 @@ export default function IotDeviceManagement() {
   const [editingDevice, setEditingDevice] = useState(null);
   const [confirmModal, setConfirmModal] = useState(null);
   const [togglingId, setTogglingId] = useState(null); // track which device is being toggled
+  const [lifecycleDevice, setLifecycleDevice] = useState(null);
 
-  const fetchDevices = async (isSilent = false) => {
+  const fetchDevices = async (isSilent = false, searchQuery = search) => {
     if (!isSilent) setLoading(true);
     try {
-      const response = await apiService.get('/iot/devices');
+      const url = searchQuery && searchQuery.trim() !== '' 
+        ? `/iot/devices?search=${encodeURIComponent(searchQuery.trim())}` 
+        : '/iot/devices';
+      const response = await apiService.get(url);
       if (response && response.success && response.data) {
         setDeviceList(response.data);
       }
@@ -427,6 +433,14 @@ export default function IotDeviceManagement() {
   };
 
   useEffect(() => {
+    const delayDebounceFn = setTimeout(() => {
+      fetchDevices(false, search);
+    }, 500);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [search]);
+
+  useEffect(() => {
     fetchDevices();
 
     const intervalId = setInterval(() => {
@@ -435,7 +449,7 @@ export default function IotDeviceManagement() {
 
     let ws = null;
     const connectWebSocket = () => {
-      const backendUrl = import.meta.env.VITE_API_URL || 'https://sftr-api.onrender.com/api';
+      const backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
       const wsUrl = backendUrl.replace('http', 'ws').replace('/api', '');
       ws = new WebSocket(wsUrl);
 
@@ -478,11 +492,7 @@ export default function IotDeviceManagement() {
     };
   }, []);
 
-  const filteredDevices = deviceList.filter(d =>
-    d.name.toLowerCase().includes(search.toLowerCase()) ||
-    (d.location && d.location.toLowerCase().includes(search.toLowerCase())) ||
-    (d.device_code && d.device_code.toLowerCase().includes(search.toLowerCase()))
-  );
+  const filteredDevices = deviceList;
 
   const totalDevices = deviceList.length;
   const activeDevices = deviceList.filter(d => !d.is_disabled && d.status === 'Online').length;
@@ -555,8 +565,7 @@ export default function IotDeviceManagement() {
                     }}
                   >
                     <td>
-                      <div style={{ fontWeight: 600, color: d.is_disabled ? 'var(--text-muted)' : 'var(--cyan-400)', fontFamily: 'var(--font-mono)' }}>{d.device_code}</div>
-                      <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)' }}>{d.name}</div>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)', fontWeight: 600 }}>{d.name}</div>
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
                         <DeviceStatusBadge device={d} />
                       </div>
@@ -574,11 +583,9 @@ export default function IotDeviceManagement() {
                       <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'normal', wordWrap: 'break-word', lineHeight: 1.4 }}>
                         {d.location}
                       </div>
-                      {d.lat && d.lng && <div style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', marginTop: 4 }}>{d.lat}, {d.lng}</div>}
                     </td>
                     <td>
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Calib Height: <span style={{ color: 'var(--text-secondary)' }}>{d.calib_empty_cm} cm</span></div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Sleep: <span style={{ color: 'var(--text-secondary)' }}>{d.sleep_interval_minutes} min</span></div>
                     </td>
                     <td style={{ minWidth: 120 }}>
                       <BatteryBar value={d.is_disabled ? 0 : (d.current_battery_level || 0)} />
@@ -599,6 +606,14 @@ export default function IotDeviceManagement() {
                     </td>
                     <td>
                       <div className="flex gap-2">
+                        <button
+                          className="btn btn-ghost btn-sm btn-icon"
+                          onClick={() => setLifecycleDevice(d)}
+                          title="Device Lifecycle"
+                          disabled={isToggling}
+                        >
+                          <Activity size={16} />
+                        </button>
                         <button
                           className="btn btn-ghost btn-sm btn-icon"
                           onClick={() => setEditingDevice(d)}
@@ -644,6 +659,7 @@ export default function IotDeviceManagement() {
       {showAddDeviceModal && <AddDeviceModal onClose={() => setShowAddDeviceModal(false)} onAdd={handleAddNewDevice} />}
       {editingDevice && <EditDeviceModal device={editingDevice} onClose={() => setEditingDevice(null)} onEdit={handleEditDevice} />}
       {confirmModal && <ConfirmModal {...confirmModal} />}
+      {lifecycleDevice && <DeviceLifecycleModal device={lifecycleDevice} onClose={() => setLifecycleDevice(null)} />}
     </div>
   );
 }

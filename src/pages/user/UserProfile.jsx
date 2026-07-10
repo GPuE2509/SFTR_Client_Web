@@ -1128,7 +1128,7 @@ export default function UserProfile({
 
       {/* Success Toast */}
       {toastMessage && (
-        <div style={{ position: 'fixed', top: 20, right: 20, zIndex: 9999, background: 'var(--green-400)', color: '#fff', padding: '12px 20px', borderRadius: 'var(--r-md)', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', fontWeight: 600 }}>
+        <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 9999, background: 'var(--green-400)', color: '#fff', padding: '12px 20px', borderRadius: 'var(--r-md)', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', fontWeight: 600 }}>
           <CheckCircle size={18} />
           {toastMessage}
         </div>

@@ -563,8 +563,8 @@ export default function Dashboard() {
           <div className="card p-5">
             <div className="section-title" style={{ marginBottom: 12 }}>Operating notes</div>
             <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-              Các chức năng quản trị được phân theo nhóm nghiệp vụ: giám sát, kiểm duyệt, cấu hình, điều phối cứu hộ và báo cáo tuân thủ.
-              Mọi thay đổi cấu hình quan trọng đều cần lưu vết nhật ký và xuất báo cáo phục vụ kiểm tra định kỳ.
+              Administrative functions are grouped by operational domains: monitoring, moderation, configuration, rescue coordination, and compliance reporting.
+              All critical configuration changes must be logged and exported in reports for periodic inspection.
             </div>
           </div>
         </div>

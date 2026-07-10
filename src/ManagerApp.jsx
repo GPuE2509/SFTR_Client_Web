@@ -1,5 +1,6 @@
 import React, { useState, Suspense, lazy } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { apiService } from './services/apiService';
 import ManagerSidebar from './components/layout/manager/ManagerSidebar';
 import ManagerTopBar from './components/layout/manager/ManagerTopBar';
 import AnimatedBackground from './components/background/AnimatedBackground';
@@ -10,7 +11,7 @@ const ManagerOps = lazy(() => import('./pages/manager/ManagerOps'));
 const CommunityReports = lazy(() => import('./pages/admin/CommunityReports'));
 const ForumModeration = lazy(() => import('./pages/admin/ForumModeration'));
 const UserManagement = lazy(() => import('./pages/admin/UserManagement'));
-const IotDeviceManagement = lazy(() => import('./pages/admin/IotDeviceManagement'));
+const IotDeviceManagement = lazy(() => import('./pages/manager/ManagerIotDeviceManagement'));
 const SystemConfig = lazy(() => import('./pages/admin/SystemConfig'));
 const SupportAnalytics = lazy(() => import('./pages/admin/SupportAnalytics'));
 const UserProfile = lazy(() => import('./pages/user/UserProfile'));
@@ -87,6 +88,31 @@ export default function ManagerApp({ onLogoutToGuest, roleRequests, onApproveReq
   React.useEffect(() => {
     setAvatarUrl(propAvatarUrl);
   }, [propAvatarUrl]);
+
+  React.useEffect(() => {
+    const fetchInitialUnreadCount = async () => {
+      try {
+        const notifsRes = await apiService.get('/notifications');
+        let notifUnread = 0;
+        if (notifsRes && notifsRes.success && notifsRes.data) {
+          notifUnread = notifsRes.data.filter(n => !n.is_read).length;
+        }
+
+        const convsRes = await apiService.get('/chat/conversations');
+        let chatUnread = 0;
+        if (convsRes && convsRes.success && convsRes.data) {
+          chatUnread = convsRes.data.reduce((acc, c) => acc + (c.unread || 0), 0);
+        }
+
+        const totalUnread = notifUnread + chatUnread;
+        localStorage.setItem('total_unread_count', totalUnread);
+        window.dispatchEvent(new CustomEvent('unread-count-changed', { detail: { count: totalUnread } }));
+      } catch (err) {
+        console.error('Failed to fetch initial unread notifications count:', err);
+      }
+    };
+    fetchInitialUnreadCount();
+  }, []);
 
   const ActivePage = pages[activePage] || ManagerDashboard;
 

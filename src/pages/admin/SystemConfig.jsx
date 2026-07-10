@@ -81,6 +81,7 @@ export default function SystemConfig() {
     waterLevelL3: 50,
     waterLevelL4: 60,
   });
+  const [waterRisingSpeedThreshold, setWaterRisingSpeedThreshold] = useState(5);
   const [retention, setRetention] = useState({
     iotData: '90',
     reports: '365',
@@ -106,6 +107,7 @@ export default function SystemConfig() {
             waterLevelL3: c.water_level_l3 ?? 50,
             waterLevelL4: c.water_level_l4 ?? 60,
           });
+          setWaterRisingSpeedThreshold(c.water_rising_speed_threshold ?? 5);
         }
       } catch (err) {
         console.error('Failed to fetch system config:', err);
@@ -149,6 +151,7 @@ export default function SystemConfig() {
         water_level_l2: thresholds.waterLevelL2,
         water_level_l3: thresholds.waterLevelL3,
         water_level_l4: thresholds.waterLevelL4,
+        water_rising_speed_threshold: waterRisingSpeedThreshold,
       });
       if (res.success) {
         setSaved(true);
@@ -242,6 +245,30 @@ export default function SystemConfig() {
               onChange={(v) => handleWaterLevelChange(3, v)}
               min={1} max={100} unit="%" colorClass="purple"
             />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border-subtle)' }}>
+              <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+                {saving ? <><div className="spinner" style={{ width: 14, height: 14 }} /> Saving...</> : <><Save size={14} /> Save Thresholds</>}
+              </button>
+            </div>
+          </div>
+
+          {/* Water Rising Speed Monitoring */}
+          <div className="card p-6">
+            <div className="section-title" style={{ marginBottom: 20 }}>
+              <Zap size={15} style={{ color: 'var(--blue-400)' }} />
+              Configure Water Rising Speed Monitoring
+            </div>
+            <AlertThresholdSlider
+              label="⚡ Water Rising Speed Alert Threshold"
+              value={waterRisingSpeedThreshold}
+              onChange={(v) => setWaterRisingSpeedThreshold(v)}
+              min={1} max={50} unit=" cm/min" colorClass="blue"
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border-subtle)' }}>
+              <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+                {saving ? <><div className="spinner" style={{ width: 14, height: 14 }} /> Saving...</> : <><Save size={14} /> Save Speed Config</>}
+              </button>
+            </div>
           </div>
 
           {/* Data Retention */}

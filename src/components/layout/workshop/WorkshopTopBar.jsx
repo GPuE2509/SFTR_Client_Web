@@ -79,14 +79,14 @@ export default function WorkshopTopBar({ activePage, collapsed, onLogout, shopNa
           }}>
             {pageInfo.title}
           </div>
-          <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div className="topbar-subtitle" style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {pageInfo.sub}
           </div>
         </div>
 
         {/* Pending tasks badge */}
         {isWsPage && taskCount > 0 && (
-          <div style={{
+          <div className="topbar-badge" style={{
             display: 'flex', alignItems: 'center', gap: 6,
             padding: '5px 12px',
             background: 'rgba(217,119,6,0.12)',
@@ -99,7 +99,7 @@ export default function WorkshopTopBar({ activePage, collapsed, onLogout, shopNa
           </div>
         )}
 
-        <div style={{
+        <div className="topbar-clock" style={{
           display: 'flex', alignItems: 'center', gap: 12,
           padding: '5px 14px',
           background: 'rgba(61,125,176,0.08)',
@@ -116,7 +116,7 @@ export default function WorkshopTopBar({ activePage, collapsed, onLogout, shopNa
           </div>
         </div>
 
-        <div style={{
+        <div className="topbar-wifi" style={{
           display: 'flex', alignItems: 'center', gap: 6,
           padding: '5px 12px',
           background: 'rgba(62,169,123,0.08)',
@@ -146,9 +146,9 @@ export default function WorkshopTopBar({ activePage, collapsed, onLogout, shopNa
             <div className="user-avatar" style={{ background: 'linear-gradient(135deg, #d97706, #f59e0b)', ...avatarStyle }}>
               {avatarUrl ? '' : avatarInitial}
             </div>
-            <div>
+            <div className="topbar-user-info">
               <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap', fontFamily: 'var(--font-display)' }}>
-                {shopName || "Minh Chau Garage"}
+                {shopName || (userName ? `${userName}'s Garage` : "Your Garage")}
               </div>
               <div style={{ fontSize: '0.6rem', color: '#f59e0b', letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 700 }}>
                 Car workshop

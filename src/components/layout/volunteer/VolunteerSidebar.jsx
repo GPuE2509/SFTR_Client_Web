@@ -35,7 +35,7 @@ const navItems = [
   },
 ];
 
-export default function VolunteerSidebar({ activePage, onNavigate, collapsed, onToggleCollapse }) {
+export default function VolunteerSidebar({ activePage, onNavigate, collapsed, onToggleCollapse, pendingSOSCount = 0 }) {
   const [unreadCount, setUnreadCount] = useState(() => {
     const cached = localStorage.getItem('total_unread_count');
     return cached ? parseInt(cached, 10) : 0;
@@ -68,7 +68,7 @@ export default function VolunteerSidebar({ activePage, onNavigate, collapsed, on
         <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border-dim)' }}>
           <div className="alert-level-bar level-3" style={{ justifyContent: 'center', gap: 8, background: 'rgba(239,29,55,0.12)', border: '1px solid rgba(239,29,55,0.25)', color: 'var(--red-400)' }}>
             <Waves size={11} />
-            ONLINE · 3 SOS REQUESTS
+            ONLINE · {pendingSOSCount} SOS REQUEST{pendingSOSCount !== 1 ? 'S' : ''}
           </div>
         </div>
       )}
@@ -90,9 +90,11 @@ export default function VolunteerSidebar({ activePage, onNavigate, collapsed, on
                 >
                   <Icon size={17} className="nav-item-icon" />
                   <span className="nav-item-label">{item.label}</span>
-                  {item.id === 'volunteer-notifications'
-                    ? (unreadCount > 0 && <span className="nav-badge">{unreadCount}</span>)
-                    : (item.badge && <span className="nav-badge">{item.badge}</span>)}
+                  {item.id === 'volunteer-missions'
+                    ? (pendingSOSCount > 0 && <span className="nav-badge">{pendingSOSCount}</span>)
+                    : (item.id === 'volunteer-notifications'
+                      ? (unreadCount > 0 && <span className="nav-badge">{unreadCount}</span>)
+                      : (item.badge && <span className="nav-badge">{item.badge}</span>))}
                 </button>
               );
             })}

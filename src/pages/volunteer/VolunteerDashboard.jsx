@@ -11,12 +11,11 @@ import { FloodTrendChart } from '../../components/charts/Charts';
 import { sosAlerts, broadcastAdvisories } from '../../data/mockData';
 
 const getWaterLevelBadge = (level, status) => {
-  if (status === 'offline' || status === 'error')
-    return { label: "Lost connection", className: 'badge-gray', color: 'var(--text-muted)', mapColor: '#475569' };
-  if (level >= 80) return { label: "Severe flooding", className: 'badge-red', color: 'var(--red-400)', mapColor: '#ef4444' };
-  if (level >= 40) return { label: "Moderate flooding", className: 'badge-orange', color: 'var(--orange-400)', mapColor: '#f97316' };
-  if (level > 0)  return { label: "Slight flooding", className: 'badge-blue', color: 'var(--cyan-400)', mapColor: '#06b6d4' };
-  return { label: "Safe", className: 'badge-green', color: 'var(--green-400)', mapColor: '#22c55e' };
+  const current = level || 0;
+  if (current > 5) {
+    return { label: `${Math.round(current * 10) / 10} cm`, className: 'badge-green', color: 'var(--green-400)', mapColor: '#22c55e' };
+  }
+  return { label: "No water", className: 'badge-gray', color: 'var(--text-muted)', mapColor: '#64748b' };
 };
 
 const activeMissions = [
@@ -106,8 +105,8 @@ export default function VolunteerDashboard({ onNavigate }) {
       </div>
 
       {/* ── BẢN ĐỒ LIVE ── */}
-      <div className="card" style={{ display: 'flex', flexDirection: 'column', height: 480, overflow: 'hidden', marginBottom: 20 }}>
-        <LiveMap activeMissions={activeMissions} height={480} hideWrapper onNavigate={onNavigate} onClickDetail={(device) => setDetailDeviceId(device.id || device.device_code)}>
+      <div className="card" style={{ display: 'flex', flexDirection: 'column', height: 620, overflow: 'hidden', marginBottom: 20 }}>
+        <LiveMap activeMissions={activeMissions} height={620} hideWrapper onNavigate={onNavigate} onClickDetail={(device) => setDetailDeviceId(device.id || device.device_code)}>
           {detailDeviceId && <DeviceDetailPanel deviceId={detailDeviceId} onClose={() => setDetailDeviceId(null)} />}
         </LiveMap>
       </div>

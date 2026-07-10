@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   Search, Filter, CheckCircle, XCircle, Eye, Megaphone,
   Bot, AlertTriangle, Clock, ChevronRight, Send, X,
-  MapPin, Camera, ThumbsUp, ThumbsDown, Radio,
+  MapPin, Camera, ThumbsUp, ThumbsDown, Radio, Timer, Archive, Users,
 } from 'lucide-react';
 import { broadcastAdvisories } from '../../data/mockData';
 
@@ -41,11 +42,29 @@ const formatRelativeTime = (dateStr) => {
   return `${date.getDate().toString().padStart(2, '0')}/${(date.getMonth() + 1).toString().padStart(2, '0')}/${date.getFullYear()}`;
 };
 
+const formatCountdown = (expiredAt) => {
+  if (!expiredAt) return null;
+  const diff = new Date(expiredAt) - new Date();
+  if (diff <= 0) return 'Expired';
+  const h = Math.floor(diff / 3600000);
+  const m = Math.floor((diff % 3600000) / 60000);
+  if (h > 0) return `${h}h ${m}m left`;
+  return `${m}m left`;
+};
+
+const lifecycleBadge = {
+  Active: <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--green-400)', background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)', padding: '2px 8px', borderRadius: 99 }}>🟢 Active</span>,
+  Pending_Verification: <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', background: 'rgba(148,163,184,0.1)', border: '1px solid rgba(148,163,184,0.3)', padding: '2px 8px', borderRadius: 99 }}>⚪ Pending Verify</span>,
+  Archived: <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--red-400)', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', padding: '2px 8px', borderRadius: 99 }}>🔴 Archived</span>,
+};
+
 function ReportModal({ report, onClose, onAction }) {
   if (!report) return null;
   const aiScore = report.ai_confidence_score ? Math.round(report.ai_confidence_score * 100) : 0;
   const aiVerdict = aiScore >= 80 ? 'verified' : aiScore >= 50 ? 'uncertain' : 'rejected';
   const parsedImages = report.images ? JSON.parse(report.images) : [];
+  const [modalTab, setModalTab] = useState('detail');
+  const countdown = formatCountdown(report.expiredAt);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -55,12 +74,24 @@ function ReportModal({ report, onClose, onAction }) {
             <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>
               Report details {report._id.slice(-6).toUpperCase()}
             </div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
-              Posted by {report.reporter_id?.full_name || report.reporter_name || 'Anonymous'} at the time {formatRelativeTime(report.created_at)}
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 8 }}>
+              Posted by {report.reporter_id?.full_name || report.reporter_name || 'Anonymous'} · {formatRelativeTime(report.created_at)}
+              {lifecycleBadge[report.lifecycle_status] || null}
+              {countdown && <span style={{ fontSize: '0.7rem', color: countdown === 'Expired' ? 'var(--red-400)' : 'var(--orange-400)', display: 'flex', alignItems: 'center', gap: 3 }}><Timer size={11} />{countdown}</span>}
             </div>
           </div>
           <button className="btn btn-ghost btn-sm btn-icon" onClick={onClose}><X size={16} /></button>
         </div>
+
+        {/* Modal Tabs */}
+        <div className="tabs-nav" style={{ padding: '0 20px', borderBottom: '1px solid var(--border-dim)' }}>
+          <button className={`tab-btn ${modalTab === 'detail' ? 'active' : ''}`} style={{ fontSize: '0.8rem' }} onClick={() => setModalTab('detail')}>📋 Details</button>
+          <button className={`tab-btn ${modalTab === 'votes' ? 'active' : ''}`} style={{ fontSize: '0.8rem' }} onClick={() => setModalTab('votes')}>
+            <Users size={12} /> Votes ({(report.vote_still_exist || 0) + (report.vote_no_more || 0) + (report.vote_wrong_report || 0)})
+          </button>
+        </div>
+
+        {modalTab === 'detail' && (
         <div className="modal-body" style={{ display: 'grid', gap: 16 }}>
           {/* User info */}
           <div className="flex items-center gap-3">
@@ -125,7 +156,54 @@ function ReportModal({ report, onClose, onAction }) {
             </div>
           </div>
         </div>
+        )}
+
+        {modalTab === 'votes' && (
+        <div className="modal-body" style={{ display: 'grid', gap: 16 }}>
+          {/* Vote summary */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+            {[
+              { label: '✅ Still exists', value: report.vote_still_exist || 0, color: 'var(--green-400)' },
+              { label: '❌ Cleared', value: report.vote_no_more || 0, color: 'var(--orange-400)' },
+              { label: '🚩 False report', value: report.vote_wrong_report || 0, color: 'var(--red-400)' },
+            ].map(s => (
+              <div key={s.label} style={{ textAlign: 'center', padding: '12px 8px', background: 'var(--bg-elevated)', borderRadius: 8, border: '1px solid var(--border-dim)' }}>
+                <div style={{ fontSize: '1.5rem', fontWeight: 800, color: s.color }}>{s.value}</div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4 }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+          {/* Vote list */}
+          {(report.voters || []).length === 0 ? (
+            <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '24px 0', fontSize: '0.85rem' }}>No votes yet</div>
+          ) : (
+            <div style={{ display: 'grid', gap: 8, maxHeight: 300, overflowY: 'auto' }}>
+              {report.voters.map((v, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: 'var(--bg-elevated)', borderRadius: 8, border: '1px solid var(--border-dim)' }}>
+                  <span style={{ fontSize: '1rem' }}>{v.vote_type === 'confirm' ? '✅' : v.vote_type === 'deny' ? '❌' : '🚩'}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                      {v.user_id?.full_name || 'User'}
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                      {v.distance_m != null ? `📍 ${v.distance_m}m away` : '📍 No GPS'}
+                      {v.photo_url && <span style={{ marginLeft: 8, color: 'var(--cyan-400)' }}>📷 Photo attached</span>}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{formatRelativeTime(v.created_at)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        )}
+
         <div className="modal-footer">
+          {report.lifecycle_status !== 'Archived' && (
+            <button className="btn btn-ghost btn-sm" style={{ color: 'var(--text-muted)' }} onClick={() => { onAction(report._id, 'archive'); onClose(); }}>
+              <Archive size={13} /> Archive
+            </button>
+          )}
           {(!report.status || report.status === 'pending') ? (
             <>
               <button className="btn btn-danger btn-sm" onClick={() => { onAction(report._id, 'rejected'); onClose(); }}>
@@ -206,6 +284,7 @@ function BroadcastModal({ onClose }) {
 }
 
 export default function CommunityReports() {
+  const location = useLocation();
   const [reports, setReports] = useState([]);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -216,15 +295,40 @@ export default function CommunityReports() {
   const [fullscreenImage, setFullscreenImage] = useState(null);
 
   React.useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const reportId = params.get('reportId');
+    if (reportId && reports.length > 0) {
+      const match = reports.find(r => r._id === reportId || r.id === reportId);
+      if (match) {
+        setSelectedReport(match);
+        setTimeout(() => {
+          const element = document.getElementById(`report-row-${reportId}`);
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            element.style.boxShadow = '0 0 15px var(--cyan-400)';
+            setTimeout(() => {
+              element.style.boxShadow = '';
+            }, 3000);
+          }
+        }, 500);
+      }
+    }
+  }, [location.search, reports]);
+
+  React.useEffect(() => {
     fetchReports();
   }, []);
 
   const fetchReports = async () => {
     try {
-      const res = await fetch('https://sftr-api.onrender.com/api/incident-reports');
+      const res = await fetch('http://localhost:5000/api/incident-reports');
       const data = await res.json();
       if (data.success) {
-        const mappedData = data.data.map(r => ({ ...r, status: r.moderation_status ? r.moderation_status.toLowerCase() : 'pending' }));
+        const mappedData = data.data.map(r => ({ 
+          ...r, 
+          status: r.moderation_status ? r.moderation_status.toLowerCase() : 'pending',
+          lifecycle_status: r.lifecycle_status || 'Active'
+        }));
         setReports(mappedData);
       }
     } catch (err) {
@@ -267,7 +371,7 @@ export default function CommunityReports() {
       return;
     }
     try {
-      const res = await fetch(`https://sftr-api.onrender.com/api/incident-reports/${id}/status`, {
+      const res = await fetch(`http://localhost:5000/api/incident-reports/${id}/status`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: action }),
@@ -286,6 +390,13 @@ export default function CommunityReports() {
     approved: <span className="badge badge-green">Approved</span>,
     rejected: <span className="badge badge-red">Rejected</span>,
   };
+
+  const filteredLifecycle = filterStatus === 'all' ? filtered : 
+    ['active', 'pending_verification', 'archived'].includes(filterStatus)
+      ? reports.filter(r => (r.lifecycle_status || 'Active').toLowerCase() === filterStatus.toLowerCase())
+      : filtered;
+
+  const displayReports = ['active', 'pending_verification', 'archived'].includes(filterStatus) ? filteredLifecycle : filtered;
 
   return (
     <div className="page-enter">
@@ -338,11 +449,18 @@ export default function CommunityReports() {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
-            <select className="input" style={{ width: 160 }} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+            <select className="input" style={{ width: 180 }} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
               <option value="all">All status</option>
-              <option value="pending">Waiting for approval</option>
-              <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
+              <optgroup label="Moderation">
+                <option value="pending">Waiting for approval</option>
+                <option value="approved">Approved</option>
+                <option value="rejected">Rejected</option>
+              </optgroup>
+              <optgroup label="Lifecycle">
+                <option value="active">🟢 Active</option>
+                <option value="pending_verification">⚪ Pending Verification</option>
+                <option value="archived">🔴 Archived</option>
+              </optgroup>
             </select>
           </div>
         )}
@@ -387,23 +505,24 @@ export default function CommunityReports() {
 
           {/* Reports list */}
           <div style={{ display: 'grid', gap: 12 }}>
-            {filtered.map((report) => {
+            {displayReports.map((report) => {
               const rStatus = report.status || 'pending';
+              const lcStatus = report.lifecycle_status || 'Active';
               const aiScore = report.ai_confidence_score ? Math.round(report.ai_confidence_score * 100) : 0;
               const aiVerdict = aiScore >= 80 ? 'verified' : aiScore >= 50 ? 'uncertain' : 'rejected';
               const parsedImages = report.images ? JSON.parse(report.images) : [];
+              const countdown = formatCountdown(report.expiredAt);
+              const borderColor = lcStatus === 'Active' ? 'var(--green-400)' : lcStatus === 'Pending_Verification' ? 'var(--text-muted)' : 'var(--red-400)';
               return (
                 <div
+                  id={`report-row-${report._id}`}
                   key={report._id}
                   className="card"
                   style={{
                     padding: '16px 20px',
-                    borderLeft: rStatus === 'pending'
-                      ? '3px solid var(--orange-400)'
-                      : rStatus === 'approved'
-                      ? '3px solid var(--green-400)'
-                      : '3px solid var(--red-400)',
+                    borderLeft: `3px solid ${borderColor}`,
                     animation: 'slide-in-up 0.3s ease-out',
+                    opacity: lcStatus === 'Archived' ? 0.6 : 1,
                   }}
                 >
                   <div className="flex items-start gap-4">
@@ -417,7 +536,13 @@ export default function CommunityReports() {
                       <div className="flex items-center gap-3 flex-wrap" style={{ marginBottom: 6 }}>
                         <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.9375rem' }}>{report.reporter_id?.full_name || report.reporter_name || 'Anonymous'}</span>
                         {statusBadge[rStatus]}
+                        {lifecycleBadge[lcStatus]}
                         <AiScoreBadge score={aiScore} verdict={aiVerdict} />
+                        {countdown && (
+                          <span style={{ fontSize: '0.7rem', color: countdown === 'Expired' ? 'var(--red-400)' : 'var(--orange-400)', display: 'flex', alignItems: 'center', gap: 3 }}>
+                            <Clock size={11} />{countdown}
+                          </span>
+                        )}
                         <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>
                           <Clock size={11} style={{ display: 'inline', marginRight: 3 }} />{formatRelativeTime(report.created_at)}
                         </span>
@@ -468,9 +593,16 @@ export default function CommunityReports() {
                       </div>
                     )}
                     {rStatus !== 'pending' && (
-                      <button className="btn btn-ghost btn-sm" onClick={() => setSelectedReport(report)}>
-                        <Eye size={13} /> Detail
-                      </button>
+                      <div className="flex items-center gap-2" style={{ flexShrink: 0 }}>
+                        <button className="btn btn-ghost btn-sm" onClick={() => setSelectedReport(report)}>
+                          <Eye size={13} /> Detail
+                        </button>
+                        {lcStatus !== 'Archived' && (
+                          <button className="btn btn-ghost btn-sm" onClick={() => handleAction(report._id, 'archive')} style={{ color: 'var(--red-400)' }}>
+                            <Archive size={13} /> Archive
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>

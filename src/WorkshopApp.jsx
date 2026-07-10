@@ -4,7 +4,7 @@ import WorkshopSidebar from './components/layout/workshop/WorkshopSidebar';
 import WorkshopTopBar from './components/layout/workshop/WorkshopTopBar';
 import AnimatedBackground from './components/background/AnimatedBackground';
 import { apiService } from './services/apiService';
-import { MessageSquare } from 'lucide-react';
+import { MessageSquare, Bell } from 'lucide-react';
 import MobileSidebarToggle from './components/layout/MobileSidebarToggle';
 
 // ── Workshop-specific pages ──
@@ -20,6 +20,7 @@ const UserDashboard     = lazy(() => import('./pages/user/UserDashboard'));
 const UserReports       = lazy(() => import('./pages/user/UserReports'));
 const UserSOS           = lazy(() => import('./pages/user/UserSOS'));
 const UserNotifications = lazy(() => import('./pages/user/UserNotifications'));
+const UserInvitations   = lazy(() => import('./pages/user/UserInvitations'));
 const UserForum         = lazy(() => import('./pages/user/UserForum'));
 const UserRewards       = lazy(() => import('./pages/user/UserRewards'));
 const UserProfile       = lazy(() => import('./pages/user/UserProfile'));
@@ -55,6 +56,7 @@ const pages = {
   'user-reports':       UserReports,
   'user-sos':           UserSOS,
   'user-notifications': UserNotifications,
+  'user-invitations':   UserInvitations,
   'user-forum':         UserForum,
   'user-rewards':       UserRewards,
   'user-profile':       UserProfile,
@@ -72,6 +74,7 @@ const pathMap = {
   '/reports': 'user-reports',
   '/sos': 'user-sos',
   '/notifications': 'user-notifications',
+  '/invitations': 'user-invitations',
   '/forum': 'user-forum',
   '/rewards': 'user-rewards',
   '/profile': 'user-profile',
@@ -128,6 +131,33 @@ export default function WorkshopApp({
     }
   }, [workshopName]);
 
+  const [activeSOSCount, setActiveSOSCount] = useState(0);
+
+  const fetchActiveSOSCount = async () => {
+    try {
+      const res = await apiService.get('/rescue/active');
+      if (res && res.success && res.data) {
+        setActiveSOSCount(1);
+      } else {
+        setActiveSOSCount(0);
+      }
+    } catch (err) {
+      console.error('Failed to fetch active SOS count:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (isLoggedIn) {
+      fetchActiveSOSCount();
+      window.addEventListener('rescue-update', fetchActiveSOSCount);
+      window.addEventListener('rescue-status-update', fetchActiveSOSCount);
+    }
+    return () => {
+      window.removeEventListener('rescue-update', fetchActiveSOSCount);
+      window.removeEventListener('rescue-status-update', fetchActiveSOSCount);
+    };
+  }, [isLoggedIn]);
+
   const ActivePage = pages[activePage] || WorkshopDashboard;
 
   const handleNavigate = (page) => {
@@ -148,6 +178,32 @@ export default function WorkshopApp({
       return () => clearTimeout(timer);
     }
   }, [globalToast]);
+
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    const fetchInitialUnreadCount = async () => {
+      try {
+        const notifsRes = await apiService.get('/notifications');
+        let notifUnread = 0;
+        if (notifsRes && notifsRes.success && notifsRes.data) {
+          notifUnread = notifsRes.data.filter(n => !n.is_read).length;
+        }
+
+        const convsRes = await apiService.get('/chat/conversations');
+        let chatUnread = 0;
+        if (convsRes && convsRes.success && convsRes.data) {
+          chatUnread = convsRes.data.reduce((acc, c) => acc + (c.unread || 0), 0);
+        }
+
+        const totalUnread = notifUnread + chatUnread;
+        localStorage.setItem('total_unread_count', totalUnread);
+        window.dispatchEvent(new CustomEvent('unread-count-changed', { detail: { count: totalUnread } }));
+      } catch (err) {
+        console.error('Failed to fetch initial unread notifications count:', err);
+      }
+    };
+    fetchInitialUnreadCount();
+  }, [isLoggedIn]);
 
   useEffect(() => {
     const isNotificationsPage = activePage === 'user-notifications';
@@ -175,12 +231,21 @@ export default function WorkshopApp({
               }));
 
               // Fetch conversations to initialize unread count from database
-              const convsRes = await apiService.get('/chat/conversations');
-              if (convsRes && convsRes.success && convsRes.data) {
-                const chatUnread = convsRes.data.reduce((acc, c) => acc + (c.unread || 0), 0);
-                localStorage.setItem('total_unread_count', chatUnread);
-                window.dispatchEvent(new CustomEvent('unread-count-changed', { detail: { count: chatUnread } }));
+              const notifsRes = await apiService.get('/notifications');
+              let notifUnread = 0;
+              if (notifsRes && notifsRes.success && notifsRes.data) {
+                notifUnread = notifsRes.data.filter(n => !n.is_read).length;
               }
+
+              const convsRes = await apiService.get('/chat/conversations');
+              let chatUnread = 0;
+              if (convsRes && convsRes.success && convsRes.data) {
+                chatUnread = convsRes.data.reduce((acc, c) => acc + (c.unread || 0), 0);
+              }
+
+              const totalUnread = notifUnread + chatUnread;
+              localStorage.setItem('total_unread_count', totalUnread);
+              window.dispatchEvent(new CustomEvent('unread-count-changed', { detail: { count: totalUnread } }));
             }
           } catch (err) {
             console.error('Background socket auth check failed:', err);
@@ -204,7 +269,23 @@ export default function WorkshopApp({
             setGlobalToast({
               id: Date.now(),
               title: `New message from ${msg.senderName}`,
-              body: msg.text
+              body: msg.text,
+              isNotification: false
+            });
+          } else if (msg.type === 'notification') {
+            // Update unread count in localStorage and dispatch event
+            const cached = localStorage.getItem('total_unread_count');
+            const currentCount = cached ? parseInt(cached, 10) : 0;
+            const newCount = currentCount + 1;
+            localStorage.setItem('total_unread_count', newCount);
+            window.dispatchEvent(new CustomEvent('unread-count-changed', { detail: { count: newCount } }));
+
+            // Show Toast
+            setGlobalToast({
+              id: Date.now(),
+              title: msg.notification.title,
+              body: msg.notification.body,
+              isNotification: true
             });
           }
         } catch (err) {
@@ -254,6 +335,7 @@ export default function WorkshopApp({
           onNavigate={handleNavigate}
           collapsed={sidebarCollapsed}
           onToggleCollapse={() => setSidebarCollapsed(p => !p)}
+          activeSOSCount={activeSOSCount}
         />
 
         <main className={`main-content ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
@@ -277,28 +359,42 @@ export default function WorkshopApp({
       {globalToast && (
         <div style={{
           position: 'fixed',
-          bottom: 24,
+          top: 24,
           right: 24,
           zIndex: 9999,
-          width: 320,
+          width: 360,
           background: 'rgba(18, 29, 40, 0.95)',
           backdropFilter: 'blur(12px)',
           border: '1px solid var(--border-default, rgba(120,150,175,0.3))',
           boxShadow: 'var(--shadow-lg), 0 0 20px rgba(69, 179, 192, 0.2)',
           borderRadius: 'var(--r-md)',
-          padding: '12px 14px',
+          padding: '14px 16px',
           display: 'flex',
           gap: 12,
           animation: 'slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
         }}>
           <style>{`
             @keyframes slideIn {
-              from { transform: translateY(100px); opacity: 0; }
-              to { transform: translateY(0); opacity: 1; }
+              from { transform: translateX(120px); opacity: 0; }
+              to { transform: translateX(0); opacity: 1; }
             }
           `}</style>
-          <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(6,182,212,0.1)', border: '1px solid rgba(6,182,212,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <MessageSquare size={16} color="var(--cyan-400)" />
+          <div style={{
+            width: 32,
+            height: 32,
+            borderRadius: '50%',
+            background: globalToast.isNotification ? 'rgba(234,179,8,0.1)' : 'rgba(6,182,212,0.1)',
+            border: globalToast.isNotification ? '1px solid rgba(234,179,8,0.3)' : '1px solid rgba(6,182,212,0.3)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0
+          }}>
+            {globalToast.isNotification ? (
+              <Bell size={16} color="#f59e0b" />
+            ) : (
+              <MessageSquare size={16} color="var(--cyan-400)" />
+            )}
           </div>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -317,10 +413,10 @@ export default function WorkshopApp({
                 style={{ padding: '2px 8px', fontSize: '0.68rem', height: 22 }}
                 onClick={() => {
                   setGlobalToast(null);
-                  handleNavigate('user-notifications');
+                  handleNavigate(globalToast.isNotification ? 'user-notifications' : 'user-notifications');
                 }}
               >
-                Reply
+                {globalToast.isNotification ? 'View' : 'Reply'}
               </button>
             </div>
           </div>

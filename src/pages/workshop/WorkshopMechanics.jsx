@@ -1,53 +1,71 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import {
   Users, Plus, Edit3, Trash2, Save, CheckCircle,
-  Clock, Star, Phone, Wrench, Calendar, ToggleRight, XCircle,
+  Clock, Star, Phone, Wrench, Calendar, ToggleRight, XCircle, Play, Pause, Mail
 } from 'lucide-react';
+import { apiService } from '../../services/apiService';
+import { AuthContext } from '../../context/AuthContext';
+import ShiftScheduleMatrix from '../../components/workshop/shift/ShiftScheduleMatrix';
 
 const SHIFTS = ["Morning (6am–2pm)", "Afternoon (2pm–10pm)", "Night (10pm–6am)", "All day"];
 const SKILLS = ["Basic motorbike", "Car flooded", "Electricity & electronics", "Replace tire", "Towing the car", "Battery", "Tram"];
 
-const initialMechanics = [
-  {
-    id: 'M01', name: "Nguyen Van Tuan", phone: '0901111111', age: 28,
-    experience: "4 years", skills: ["Basic motorbike", "Car flooded", "Replace tire"],
-    shift: "Morning (6am–2pm)", status: 'active', onDuty: true,
-    tasks: 245, rating: 4.8, joinDate: '01/03/2024', salary: '8.500.000',
-    currentTask: 'WO-042',
-  },
-  {
-    id: 'M02', name: "Le Quoc Hung", phone: '0902222222', age: 35,
-    experience: "8 years", skills: ["Basic motorbike", "Electricity & electronics", "Battery", "Tram"],
-    shift: "Afternoon (2pm–10pm)", status: 'active', onDuty: true,
-    tasks: 389, rating: 4.9, joinDate: '15/01/2023', salary: '11.000.000',
-    currentTask: 'WO-044',
-  },
-  {
-    id: 'M03', name: "Pham Thanh Long", phone: '0903333333', age: 24,
-    experience: "2 years", skills: ["Basic motorbike", "Replace tire", "Towing the car"],
-    shift: "All day", status: 'active', onDuty: false,
-    tasks: 98, rating: 4.5, joinDate: '10/07/2025', salary: '7.000.000',
-    currentTask: null,
-  },
-  {
-    id: 'M04', name: "Tran Van Binh", phone: '0904444444', age: 30,
-    experience: "5 years", skills: ["Basic motorbike", "Car flooded", "Towing the car", "Battery"],
-    shift: "Night (10pm–6am)", status: 'inactive', onDuty: false,
-    tasks: 162, rating: 4.6, joinDate: '20/06/2024', salary: '9.000.000',
-    currentTask: null,
-  },
-];
-
 export default function WorkshopMechanics({ linkRequests = [], onApproveLink, onRejectLink }) {
-  const [mechanics, setMechanics] = useState(initialMechanics);
+  const [error, setError] = useState(null);
+  const [isCurrentUserOwner, setIsCurrentUserOwner] = useState(false);
+  const { role } = useContext(AuthContext);
+  const [mechanics, setMechanics] = useState([]);
   const [selected, setSelected] = useState(null);
   const [editing, setEditing] = useState(null); // mechanic ID being edited
   const [adding, setAdding] = useState(false);
   const [saved, setSaved] = useState(false);
   const [activeTab, setActiveTab] = useState('list');
+  const [suspendingStaff, setSuspendingStaff] = useState(null);
+  const [toast, setToast] = useState(null); // { type: 'success' | 'error', message: '' }
+  // Local state for interactive schedule demo
+  const [schedules, setSchedules] = useState({});
   const [newMechanic, setNewMechanic] = useState({
     name: '', phone: '', age: '', experience: '', skills: [], shift: "Morning (6am–2pm)", salary: '',
   });
+
+  useEffect(() => {
+    fetchStaff();
+  }, []);
+
+  const fetchStaff = async () => {
+    try {
+      const res = await apiService.get('/workshops/me/staff');
+      if (res && res.staff) {
+        setIsCurrentUserOwner(res.isOwner || false);
+        // Map backend schema to UI format
+        const mapped = res.staff.map(s => ({
+          id: s._id,
+          userId: s.user_id?._id || s.user_id,
+          name: s.user_id?.full_name || 'Unknown User',
+          phone: s.user_id?.phone || s.user_id?.email || 'N/A',
+          rawEmail: s.user_id?.email,
+          rawPhone: s.user_id?.phone,
+          avatarUrl: s.user_id?.avatar_url,
+          isOwner: s.is_owner,
+          age: 0,
+          experience: 'N/A',
+          skills: [],
+          shift: 'Morning (6am–2pm)',
+          status: (s.status === 'Pending_Invite' || s.status === 'Pending Invite') ? 'pending' : s.status === 'Rejected' ? 'rejected' : s.status === 'Suspended' ? 'suspended' : (s.status === 'Inactive' ? 'inactive' : 'active'),
+          onDuty: s.status === 'Available', // or Busy
+          tasks: 0,
+          rating: 5.0,
+          invitedAt: s.invited_at ? new Date(s.invited_at).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }) : 'Unknown',
+          joinDate: new Date(s.created_at).toLocaleDateString('vi-VN'),
+          salary: 0,
+          currentTask: null
+        }));
+        setMechanics(mapped);
+      }
+    } catch (error) {
+      console.error('Failed to fetch staff:', error);
+    }
+  };
 
   const toggleSkill = (mechId, skill) => {
     setMechanics(prev => prev.map(m => m.id === mechId
@@ -71,17 +89,40 @@ export default function WorkshopMechanics({ linkRequests = [], onApproveLink, on
     setMechanics(prev => prev.map(m => m.id === id ? { ...m, status: m.status === 'active' ? 'inactive' : 'active', onDuty: false } : m));
   };
 
+  const confirmSuspend = async () => {
+    if (!suspendingStaff) return;
+    try {
+      const res = await apiService.put(`/workshops/me/staff/${suspendingStaff.userId}/suspend`);
+      if (res) {
+        setToast({ type: 'success', message: res.message || 'Suspension status toggled!' });
+        fetchStaff();
+      }
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Failed to toggle suspension.' });
+    }
+    setSuspendingStaff(null);
+  };
+
   const deleteMechanic = (id) => {
     setMechanics(prev => prev.filter(m => m.id !== id));
     if (selected?.id === id) setSelected(null);
   };
 
-  const addMechanic = () => {
-    if (!newMechanic.name.trim() || !newMechanic.phone.trim()) return;
-    const m = { ...newMechanic, id: `M${Date.now()}`, status: 'active', onDuty: false, tasks: 0, rating: 5.0, joinDate: new Date().toLocaleDateString('vi-VN'), currentTask: null };
-    setMechanics(prev => [m, ...prev]);
-    setNewMechanic({ name: '', phone: '', age: '', experience: '', skills: [], shift: "Morning (6am–2pm)", salary: '' });
-    setAdding(false);
+  const addMechanic = async () => {
+    if (!newMechanic.phone.trim()) return;
+    try {
+      const res = await apiService.post('/workshops/me/staff/invite', { phone_or_email: newMechanic.phone });
+      if (res) {
+        setToast({ type: 'success', message: 'Invitation sent successfully!' });
+        setNewMechanic({ name: '', phone: '', age: '', experience: '', skills: [], shift: "Morning (6am–2pm)", salary: '' });
+        setAdding(false);
+        fetchStaff(); // Refresh the list
+      }
+    } catch (err) {
+      console.error('Failed to invite staff:', err);
+      setToast({ type: 'error', message: err.message || 'Failed to invite user.' });
+    }
+    setTimeout(() => setToast(null), 4000);
   };
 
   const saveEdit = () => {
@@ -90,33 +131,66 @@ export default function WorkshopMechanics({ linkRequests = [], onApproveLink, on
     setTimeout(() => setSaved(false), 2000);
   };
 
-  const onDutyCount = mechanics.filter(m => m.onDuty).length;
+  const onDutyCount = mechanics.filter(m => m.onDuty && m.status !== 'pending').length;
   const activeCount = mechanics.filter(m => m.status === 'active').length;
+  const activeMechanics = mechanics.filter(m => m.status === 'active' || m.status === 'inactive' || m.status === 'suspended');
+  const pendingMechanics = mechanics.filter(m => m.status === 'pending' || m.status === 'rejected');
+  const pendingCount = mechanics.filter(m => m.status === 'pending').length;
+  const averageRating = activeMechanics.length > 0 
+    ? (activeMechanics.reduce((s, m) => s + m.rating, 0) / activeMechanics.length).toFixed(1) 
+    : '0';
 
   return (
-    <div className="page-enter">
+    <div className="page-enter" style={{ position: 'relative' }}>
+      
+      {/* Toast Notification */}
+      {toast && (
+        <div style={{
+          position: 'fixed',
+          top: 20,
+          right: 20,
+          zIndex: 9999,
+          background: toast.type === 'success' ? '#10b981' : '#ef4444',
+          color: 'white',
+          padding: '12px 20px',
+          borderRadius: 8,
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          fontWeight: 500,
+          animation: 'slideInRight 0.3s ease-out forwards',
+        }}>
+          {toast.type === 'success' ? <CheckCircle size={18} /> : <XCircle size={18} />}
+          {toast.message}
+          <button onClick={() => setToast(null)} style={{ background: 'transparent', border: 'none', color: 'white', marginLeft: 8, cursor: 'pointer' }}>
+            <XCircle size={14} />
+          </button>
+        </div>
+      )}
+
       <div className="page-header">
-        <div className="flex items-center justify-between">
+        <div className="flex justify-between items-center flex-wrap gap-4" style={{ marginBottom: 24 }}>
           <div>
-            <h1>Vehicle repairman manager</h1>
-            <p>Add, manage Workshop Staff, shifts and track performance</p>
+            <h1 style={{ fontSize: '1.4rem', fontWeight: 800, margin: '0 0 6px 0', color: 'var(--text-primary)' }}>Workshop Staff Management</h1>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', margin: 0 }}>Invite and manage Workshop Staff, shifts, and track performance</p>
           </div>
-          <div className="flex items-center gap-3">
-            {saved && <div className="flex items-center gap-2" style={{ color: 'var(--green-400)', fontWeight: 600, fontSize: '0.875rem' }}><CheckCircle size={15} /> Saved</div>}
-            <button className="btn btn-primary" onClick={() => setAdding(true)}>
-              <Plus size={14} /> Add new workers
+          {saved && <div className="flex items-center gap-2" style={{ color: 'var(--green-400)', fontWeight: 600, fontSize: '0.875rem' }}><CheckCircle size={15} /> Saved</div>}
+          {role === 'workshop' && isCurrentUserOwner && (
+            <button className="btn btn-primary" onClick={() => { setAdding(true); setSelected(null); }}>
+              <Plus size={16} /> Invite User
             </button>
-          </div>
+          )}
         </div>
       </div>
 
       {/* Stats */}
       <div className="grid grid-4" style={{ marginBottom: 24 }}>
         {[
-          { label: "General Workshop Staff", value: mechanics.length, color: 'var(--cyan-400)' },
+          { label: "Total Staff", value: activeMechanics.length, color: 'var(--cyan-400)' },
           { label: "Active", value: activeCount, color: 'var(--green-400)' },
           { label: "On duty", value: onDutyCount, color: '#f59e0b' },
-          { label: "TB Review", value: (mechanics.reduce((s, m) => s + m.rating, 0) / mechanics.length).toFixed(1) + '★', color: 'var(--gold-400)' },
+          { label: "Average Rating", value: averageRating + '★', color: 'var(--gold-400)' },
         ].map(s => (
           <div key={s.label} className="card p-5 flex items-center gap-4">
             <div style={{ fontSize: '1.5rem', fontWeight: 800, color: s.color, fontFamily: 'var(--font-mono)' }}>{s.value}</div>
@@ -128,66 +202,39 @@ export default function WorkshopMechanics({ linkRequests = [], onApproveLink, on
       {/* Tabs */}
       <div className="tabs-nav" style={{ marginBottom: 20, maxWidth: 600 }}>
         <button className={`tab-btn ${activeTab === 'list' ? 'active' : ''}`} onClick={() => setActiveTab('list')}>
-          <Users size={13} /> List of workers
+          <Users size={13} /> Staff List
         </button>
         <button className={`tab-btn ${activeTab === 'schedule' ? 'active' : ''}`} onClick={() => setActiveTab('schedule')}>
-          <Calendar size={13} /> Shift
+          <Calendar size={13} /> Shift Schedule
         </button>
         <button className={`tab-btn ${activeTab === 'approvals' ? 'active' : ''}`} onClick={() => setActiveTab('approvals')}>
-          <Clock size={13} /> Browse links
-          {linkRequests.filter(r => r.status === 'pending').length > 0 && (
+          <Clock size={13} /> Waiting for respond
+          {(linkRequests.filter(r => r.status === 'pending').length + pendingCount) > 0 && (
             <span style={{ marginLeft: 6, padding: '2px 6px', background: 'var(--red-500)', color: 'white', borderRadius: 10, fontSize: '0.62rem', fontWeight: 700 }}>
-              {linkRequests.filter(r => r.status === 'pending').length}
+              {linkRequests.filter(r => r.status === 'pending').length + pendingCount}
             </span>
           )}
         </button>
       </div>
 
-      {/* Add mechanic form */}
+      {/* Invite/Add mechanic form */}
       {adding && (
         <div className="card p-6" style={{ marginBottom: 20, border: '1px solid rgba(217,119,6,0.3)' }}>
-          <div className="section-title" style={{ marginBottom: 16 }}>Add new Workshop Staff</div>
-          <div className="grid grid-2" style={{ gap: 12, marginBottom: 12 }}>
-            {[
-              { key: 'name', label: "Full name", placeholder: "Nguyen Van X" },
-              { key: 'phone', label: "Phone number", placeholder: '09xxxxxxxx' },
-              { key: 'age', label: "Year old", placeholder: '25' },
-              { key: 'experience', label: "Experience", placeholder: "Example: 3 years" },
-              { key: 'salary', label: "Salary (VND)", placeholder: 'VD: 8.000.000' },
-              { key: 'shift', label: "Shift", type: 'select' },
-            ].map(f => (
-              <div key={f.key}>
-                <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>{f.label}</label>
-                {f.type === 'select' ? (
-                  <select className="input" value={newMechanic.shift} onChange={e => setNewMechanic(p => ({ ...p, shift: e.target.value }))}>
-                    {SHIFTS.map(s => <option key={s}>{s}</option>)}
-                  </select>
-                ) : (
-                  <input className="input" placeholder={f.placeholder} value={newMechanic[f.key]} onChange={e => setNewMechanic(p => ({ ...p, [f.key]: e.target.value }))} />
-                )}
-              </div>
-            ))}
-          </div>
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: 8 }}>Professional skills</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {SKILLS.map(skill => {
-                const isActive = newMechanic.skills.includes(skill);
-                return (
-                  <button key={skill} onClick={() => toggleNewSkill(skill)} style={{
-                    padding: '4px 10px', fontSize: '0.75rem', borderRadius: 999, cursor: 'pointer',
-                    border: isActive ? '1px solid rgba(217,119,6,0.4)' : '1px solid var(--border-dim)',
-                    background: isActive ? 'rgba(217,119,6,0.12)' : 'transparent',
-                    color: isActive ? '#f59e0b' : 'var(--text-muted)',
-                  }}>
-                    {isActive ? '✓ ' : ''}{skill}
-                  </button>
-                );
-              })}
+          <div className="section-title" style={{ marginBottom: 16 }}>Invite User to Workshop Staff</div>
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>User Phone / Email</label>
+            <input 
+              className="input" 
+              placeholder="Enter phone number or email to invite..." 
+              value={newMechanic.phone} 
+              onChange={e => setNewMechanic(p => ({ ...p, phone: e.target.value }))} 
+            />
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 6 }}>
+              The user will receive a notification in their app. Once they accept, their profile details will be displayed here automatically.
             </div>
           </div>
           <div className="flex gap-3">
-            <button className="btn btn-success" onClick={addMechanic}><CheckCircle size={14} /> More workers</button>
+            <button className="btn btn-primary" onClick={addMechanic}><CheckCircle size={14} /> Send Invite</button>
             <button className="btn btn-ghost btn-sm" onClick={() => setAdding(false)}>Cancel</button>
           </div>
         </div>
@@ -197,8 +244,15 @@ export default function WorkshopMechanics({ linkRequests = [], onApproveLink, on
       {activeTab === 'list' && (
         <div className="grid" style={{ gridTemplateColumns: selected ? '1fr 1fr' : '1fr', gap: 16 }}>
           <div style={{ display: 'grid', gap: 12 }}>
-            {mechanics.map(m => (
-              <div key={m.id} className="card" style={{
+            {activeMechanics.length === 0 ? (
+              <div className="card p-6" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                <Users size={32} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
+                <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>No staff added yet</div>
+                <div style={{ fontSize: '0.85rem' }}>Please invite users to manage your workshop staff.</div>
+              </div>
+            ) : (
+              activeMechanics.map(m => (
+                <div key={m.id} className="card" style={{
                 padding: '16px 18px',
                 borderLeft: m.onDuty ? '3px solid #f59e0b' : m.status === 'inactive' ? '3px solid var(--border-dim)' : '3px solid var(--border-default)',
                 opacity: m.status === 'inactive' ? 0.6 : 1,
@@ -208,19 +262,25 @@ export default function WorkshopMechanics({ linkRequests = [], onApproveLink, on
               }} onClick={() => setSelected(m)}>
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-start gap-3" style={{ flex: 1 }}>
-                    <div className="user-avatar" style={{ width: 44, height: 44, fontSize: '0.85rem', flexShrink: 0, background: m.onDuty ? 'linear-gradient(135deg, #d97706, #f59e0b)' : undefined }}>
-                      {m.name.split(' ').slice(-2).map(n => n[0]).join('')}
+                    <div className="user-avatar" style={{ width: 44, height: 44, fontSize: '0.85rem', flexShrink: 0, background: m.onDuty ? 'linear-gradient(135deg, #d97706, #f59e0b)' : undefined, overflow: 'hidden' }}>
+                      {m.avatarUrl ? (
+                        <img src={m.avatarUrl} alt="Avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      ) : (
+                        m.name.split(' ').slice(-2).map(n => n[0]).join('')
+                      )}
                     </div>
                     <div style={{ flex: 1 }}>
                       <div className="flex items-center gap-2 flex-wrap" style={{ marginBottom: 3 }}>
                         <span style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text-primary)' }}>{m.name}</span>
-                        <span className={`badge ${m.status === 'active' ? (m.onDuty ? 'badge-orange' : 'badge-green') : ''}`} style={{ fontSize: '0.62rem', ...(m.status === 'inactive' ? { background: 'rgba(71,85,105,0.3)', color: 'var(--text-muted)' } : {}) }}>
-                          {m.status === 'inactive' ? "Quit one's job" : m.onDuty ? "On duty" : "Waiting for work"}
+                        {m.isOwner && <span className="badge" style={{ fontSize: '0.62rem', background: 'rgba(71,85,105,0.2)', color: 'var(--text-secondary)' }}>Owner</span>}
+                        <span className={`badge ${m.status === 'active' ? (m.onDuty ? 'badge-orange' : 'badge-green') : m.status === 'pending' ? 'badge-blue' : ''}`} style={{ fontSize: '0.62rem', ...(m.status === 'inactive' ? { background: 'rgba(71,85,105,0.3)', color: 'var(--text-muted)' } : m.status === 'suspended' ? { background: 'rgba(234,179,8,0.2)', color: 'var(--yellow-400)' } : {}) }}>
+                          {m.status === 'inactive' ? "Resigned" : m.status === 'pending' ? "Pending Invite" : m.status === 'suspended' ? "SUSPENDED" : m.onDuty ? "ON DUTY" : "AVAILABLE"}
                         </span>
                         {m.currentTask && <span className="badge badge-blue" style={{ fontSize: '0.6rem' }}>{m.currentTask}</span>}
                       </div>
                       <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 4 }}>
-                        <Phone size={11} style={{ display: 'inline', marginRight: 3 }} />{m.phone} · {m.experience} · {m.shift}
+                        {m.rawEmail ? <Mail size={11} style={{ display: 'inline', marginRight: 3 }} /> : <Phone size={11} style={{ display: 'inline', marginRight: 3 }} />}
+                        {[m.rawEmail, m.rawPhone].filter(Boolean).join(' / ') || 'N/A'}
                       </div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                         {m.skills.slice(0, 3).map(s => (
@@ -235,20 +295,28 @@ export default function WorkshopMechanics({ linkRequests = [], onApproveLink, on
                     <div style={{ display: 'flex', gap: 2, justifyContent: 'flex-end', marginBottom: 4 }}>
                       {[1,2,3,4,5].map(s => <Star key={s} size={11} fill={s <= Math.round(m.rating) ? '#f59e0b' : 'none'} color={s <= Math.round(m.rating) ? '#f59e0b' : 'var(--border-default)'} />)}
                     </div>
-                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: 'var(--text-muted)' }}>{m.tasks} single</div>
-                    <div className="flex gap-2" style={{ marginTop: 6 }}>
-                      <button className="btn btn-ghost btn-sm" style={{ padding: '3px 8px' }} onClick={e => { e.stopPropagation(); setEditing(m.id); setSelected(m); }}>
-                        <Edit3 size={12} />
-                      </button>
-                      <button className="btn btn-ghost btn-sm" style={{ padding: '3px 8px', color: 'var(--red-400)' }} onClick={e => { e.stopPropagation(); deleteMechanic(m.id); }}>
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: 'var(--text-muted)' }}>{m.tasks} tasks</div>
+                      <div className="flex gap-2" style={{ marginTop: 6 }}>
+                        {isCurrentUserOwner && (
+                          <>
+                            <button className="btn btn-ghost btn-sm" style={{ padding: '3px 8px', color: m.status === 'suspended' ? 'var(--green-400)' : 'var(--yellow-400)' }} onClick={e => { e.stopPropagation(); setSuspendingStaff(m); }}>
+                              {m.status === 'suspended' ? <Play size={12} /> : <Pause size={12} />}
+                            </button>
+                            <button className="btn btn-ghost btn-sm" style={{ padding: '3px 8px' }} onClick={e => { e.stopPropagation(); setEditing(m.id); setSelected(m); }}>
+                              <Edit3 size={12} />
+                            </button>
+                            <button className="btn btn-ghost btn-sm" style={{ padding: '3px 8px', color: 'var(--red-400)' }} onClick={e => { e.stopPropagation(); deleteMechanic(m.id); }}>
+                              <Trash2 size={12} />
+                            </button>
+                          </>
+                        )}
+                      </div>
                   </div>
                 </div>
               </div>
-            ))}
-          </div>
+            ))
+          )}
+        </div>
 
           {/* Detail panel */}
           {selected && (
@@ -259,22 +327,26 @@ export default function WorkshopMechanics({ linkRequests = [], onApproveLink, on
               </div>
 
               <div style={{ textAlign: 'center', marginBottom: 16 }}>
-                <div className="user-avatar" style={{ width: 56, height: 56, fontSize: '1.1rem', margin: '0 auto 10px', background: selected.onDuty ? 'linear-gradient(135deg, #d97706, #f59e0b)' : undefined }}>
-                  {selected.name.split(' ').slice(-2).map(n => n[0]).join('')}
+                <div className="user-avatar" style={{ width: 56, height: 56, fontSize: '1.1rem', margin: '0 auto 10px', background: selected.onDuty ? 'linear-gradient(135deg, #d97706, #f59e0b)' : undefined, overflow: 'hidden' }}>
+                  {selected.avatarUrl ? (
+                    <img src={selected.avatarUrl} alt="Avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : (
+                    selected.name.split(' ').slice(-2).map(n => n[0]).join('')
+                  )}
                 </div>
-                <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--text-primary)' }}>{selected.name}</div>
+                <div style={{ fontWeight: 800, fontSize: '1.1rem', color: 'var(--text-primary)' }}>{selected.name}</div>
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{selected.experience} experience</div>
               </div>
 
               <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
                 {[
-                  { label: "Phone number", value: selected.phone },
-                  { label: "Year old", value: selected.age + " year old" },
+                  { label: "Phone Number", value: selected.phone },
+                  { label: "Age", value: selected.age + " years old" },
                   { label: "Shift", value: selected.shift },
-                  { label: "Day of work", value: selected.joinDate },
-                  { label: "Wage", value: `${parseInt(selected.salary?.toString().replace(/\D/g, '') || '0').toLocaleString('vi-VN')}d/month` },
-                  { label: "Total order", value: `${selected.tasks} single` },
-                  { label: "Evaluate", value: `${selected.rating} ★` },
+                  { label: "Join Date", value: selected.joinDate },
+                  { label: "Salary", value: `${parseInt(selected.salary?.toString().replace(/\D/g, '') || '0').toLocaleString('vi-VN')}₫/month` },
+                  { label: "Total Tasks", value: `${selected.tasks} tasks` },
+                  { label: "Rating", value: `${selected.rating} ★` },
                 ].map(row => (
                   <div key={row.label} className="flex justify-between" style={{ padding: '6px 0', borderBottom: '1px solid var(--border-dim)', fontSize: '0.8rem' }}>
                     <span style={{ color: 'var(--text-muted)' }}>{row.label}</span>
@@ -311,8 +383,8 @@ export default function WorkshopMechanics({ linkRequests = [], onApproveLink, on
                     <span className="toggle-slider" />
                   </label>
                 </div>
-                <button className="btn btn-ghost btn-sm" style={{ color: 'var(--orange-400)', borderColor: 'var(--orange-400)' }} onClick={() => toggleStatus(selected.id)}>
-                  <ToggleRight size={13} /> {mechanics.find(m => m.id === selected.id)?.status === 'active' ? "Suspension of Workshop Staff" : "Reactivate"}
+                <button className={`btn btn-sm ${mechanics.find(m => m.id === selected.id)?.status === 'active' ? 'btn-danger' : 'btn-success'}`} onClick={() => toggleStatus(selected.id)}>
+                  <ToggleRight size={13} /> {mechanics.find(m => m.id === selected.id)?.status === 'active' ? "Suspend Activities" : "Reactivate"}
                 </button>
                 {editing === selected.id ? (
                   <button className="btn btn-success btn-sm" onClick={saveEdit}><Save size={13} /> Save changes</button>
@@ -327,59 +399,22 @@ export default function WorkshopMechanics({ linkRequests = [], onApproveLink, on
 
       {/* Tab: Schedule */}
       {activeTab === 'schedule' && (
-        <div className="card" style={{ overflow: 'hidden' }}>
-          <div style={{ padding: '12px 18px', background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border-subtle)' }}>
-            <div className="section-title">Schedule for this week</div>
-          </div>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'var(--font-sans)', fontSize: '0.78rem' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--border-dim)' }}>
-                  <th style={{ padding: '10px 16px', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 600 }}>Workshop Staff</th>
-                  {['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'].map(d => (
-                    <th key={d} style={{ padding: '10px 16px', textAlign: 'center', color: 'var(--text-muted)', fontWeight: 600 }}>{d}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {mechanics.filter(m => m.status === 'active').map((m, ri) => {
-                  const shifts = [true, true, false, true, true, true, false];
-                  return (
-                    <tr key={m.id} style={{ borderBottom: ri < mechanics.length - 1 ? '1px solid var(--border-dim)' : 'none' }}>
-                      <td style={{ padding: '10px 16px' }}>
-                        <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{m.name}</div>
-                        <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>{m.shift}</div>
-                      </td>
-                      {shifts.map((on, di) => (
-                        <td key={di} style={{ padding: '10px 16px', textAlign: 'center' }}>
-                          <div style={{
-                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                            width: 28, height: 28, borderRadius: 'var(--r-sm)',
-                            background: on ? 'rgba(217,119,6,0.12)' : 'transparent',
-                            border: on ? '1px solid rgba(217,119,6,0.3)' : '1px solid var(--border-dim)',
-                            fontSize: '0.6rem', fontWeight: 700,
-                            color: on ? '#f59e0b' : 'var(--text-dim)',
-                          }}>
-                            {on ? '✓' : '—'}
-                          </div>
-                        </td>
-                      ))}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <ShiftScheduleMatrix 
+          staffList={mechanics.filter(m => m.status === 'active' || m.status === 'inactive' || m.status === 'suspended' || m.isOwner)} 
+          isOwner={isCurrentUserOwner}
+        />
       )}
-      {/* Tab: Link Approvals */}
+
+      {/* Tab: Link Approvals & Invites */}
       {activeTab === 'approvals' && (
         <div className="card p-6">
-          <div className="section-title" style={{ marginBottom: 16 }}>List of Workshop Staff link requirements</div>
-          {linkRequests.length === 0 ? (
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No affiliation required.</p>
+          <div className="section-title" style={{ marginBottom: 16 }}>Waiting for respond</div>
+          
+          {(linkRequests.length === 0 && pendingMechanics.length === 0) ? (
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No requests or pending invitations at the moment.</p>
           ) : (
             <div style={{ display: 'grid', gap: 12 }}>
+              {/* Incoming Join Requests */}
               {linkRequests.map((req) => (
                 <div key={req.id} className="card p-4" style={{ border: '1px solid var(--border-subtle)', background: 'rgba(255,255,255,0.01)' }}>
                   <div className="flex justify-between items-center flex-wrap gap-4">
@@ -388,7 +423,8 @@ export default function WorkshopMechanics({ linkRequests = [], onApproveLink, on
                         {req.userName}
                       </div>
                       <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                        Request a link to work as a helper at: <strong>{req.requestedShop}</strong> · Date sent: {req.date}
+                        <span className="badge badge-orange" style={{ marginRight: 6 }}>Join Request</span>
+                        Requested to join workshop: <strong>{req.requestedShop}</strong> · Date: {req.date}
                       </div>
                     </div>
                     <div>
@@ -423,7 +459,7 @@ export default function WorkshopMechanics({ linkRequests = [], onApproveLink, on
                               }
                             }}
                           >
-                            Browse
+                            Approve
                           </button>
                           <button 
                             className="btn btn-danger btn-sm" 
@@ -433,16 +469,73 @@ export default function WorkshopMechanics({ linkRequests = [], onApproveLink, on
                           </button>
                         </div>
                       ) : (
-                        <span className={`badge ${req.status === 'approved' ? 'badge-green' : 'badge-red'}`}>
-                          {req.status === 'approved' ? "Approved" : "Refused"}
-                        </span>
+                  <div style={{
+                    fontSize: '0.65rem', fontWeight: 700, padding: '4px 10px', borderRadius: 6,
+                    background: req.status === 'pending' ? 'rgba(56,189,248,0.1)' : req.status === 'rejected' ? 'rgba(239,68,68,0.1)' : 'rgba(16,185,129,0.1)',
+                    color: req.status === 'pending' ? 'var(--cyan-400)' : req.status === 'rejected' ? 'var(--red-400)' : 'var(--green-400)'
+                  }}>
+                    {req.status === 'pending' ? 'PENDING' : req.status === 'rejected' ? 'REJECTED' : 'ACCEPTED'}
+                  </div>
                       )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              {/* Outgoing Invitations */}
+              {pendingMechanics.map((m) => (
+                <div key={m.id} className="card p-4" style={{ border: '1px solid var(--border-subtle)', background: 'rgba(255,255,255,0.01)' }}>
+                  <div className="flex justify-between items-center flex-wrap gap-4">
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text-primary)', marginBottom: 4 }}>
+                        {m.name} {(m.rawEmail || m.rawPhone) ? `(${[m.rawEmail, m.rawPhone].filter(Boolean).join('/')})` : ''}
+                      </div>
+                      <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                        <span className="badge badge-blue" style={{ marginRight: 6 }}>Invitation Sent</span>
+                        Waiting for user to accept the staff invitation. {m.invitedAt !== 'Unknown' && <span style={{ marginLeft: 4 }}>· Invited at: {m.invitedAt}</span>}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{
+                        fontSize: '0.65rem', fontWeight: 700, padding: '4px 10px', borderRadius: 6,
+                        background: m.status === 'pending' ? 'rgba(56,189,248,0.1)' : m.status === 'rejected' ? 'rgba(239,68,68,0.1)' : 'rgba(16,185,129,0.1)',
+                        color: m.status === 'pending' ? 'var(--cyan-400)' : m.status === 'rejected' ? 'var(--red-400)' : 'var(--green-400)'
+                      }}>
+                        {m.status === 'pending' ? 'PENDING' : m.status === 'rejected' ? 'REJECTED' : 'ACCEPTED'}
+                      </div>
                     </div>
                   </div>
                 </div>
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Suspend Modal */}
+      {suspendingStaff && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.7)', zIndex: 9999,
+          display: 'flex', alignItems: 'center', justifyContent: 'center'
+        }}>
+          <div className="card p-6" style={{ width: '90%', maxWidth: 400, background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', borderRadius: 12 }}>
+            <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 12 }}>
+              {suspendingStaff.status === 'suspended' ? 'Lift Suspension' : 'Suspend Staff'}
+            </div>
+            <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: 24, lineHeight: 1.5 }}>
+              {suspendingStaff.status === 'suspended'
+                ? `Are you sure you want to lift the suspension for ${suspendingStaff.name}? They will be able to resume their shifts.`
+                : `Are you sure you want to suspend ${suspendingStaff.name}? All their future shifts will be marked as suspended.`
+              }
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+              <button className="btn btn-ghost" onClick={() => setSuspendingStaff(null)}>Cancel</button>
+              <button className="btn" style={{ background: 'var(--yellow-500)', color: '#000', fontWeight: 600 }} onClick={confirmSuspend}>
+                {suspendingStaff.status === 'suspended' ? 'Lift Suspension' : 'Confirm'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

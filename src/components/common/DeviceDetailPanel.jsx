@@ -7,6 +7,7 @@ export default function DeviceDetailPanel({ deviceId, onClose }) {
   const [device, setDevice] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [systemConfig, setSystemConfig] = useState(null);
 
   useEffect(() => {
     if (!deviceId) return;
@@ -29,7 +30,19 @@ export default function DeviceDetailPanel({ deviceId, onClose }) {
       }
     };
 
+    const fetchConfig = async () => {
+      try {
+        const res = await apiService.get('/iot/config');
+        if (res.success && res.data) {
+          setSystemConfig(res.data);
+        }
+      } catch (err) {
+        console.error("Error fetching warning config:", err);
+      }
+    };
+
     fetchDeviceDetails(true);
+    fetchConfig();
 
     const intervalId = setInterval(() => {
       fetchDeviceDetails(false);
@@ -141,30 +154,86 @@ export default function DeviceDetailPanel({ deviceId, onClose }) {
                 Configuration & Thresholds
               </h4>
               
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>Status</span>
-                  <span style={{ color: device.status === 'Online' ? 'var(--green-400)' : 'var(--red-400)', fontWeight: 600 }}>{device.status}</span>
-                </div>
-                
+              {(() => {
+                const currentPct = (((device.current_water_level || 0) / (device.calib_empty_cm || 100)) * 100);
+                const getWarningStatusInfo = (status, pct, config) => {
+                  let activeStatus = status;
+                  if (!activeStatus && config) {
+                    const l1 = config.water_level_l1 ?? 20;
+                    const l2 = config.water_level_l2 ?? 40;
+                    const l3 = config.water_level_l3 ?? 50;
+                    const l4 = config.water_level_l4 ?? 60;
+                    if (pct >= l4) activeStatus = 'critical';
+                    else if (pct >= l3) activeStatus = 'severe';
+                    else if (pct >= l2) activeStatus = 'moderate';
+                    else if (pct >= l1) activeStatus = 'slight';
+                    else activeStatus = 'safe';
+                  }
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>Calibration (Empty)</span>
-                  <span style={{ color: 'var(--text-primary)' }}>{device.calib_empty_cm || 100} cm</span>
-                </div>
+                  switch (activeStatus) {
+                    case 'critical': return { label: 'Critical flooding (Level 4)', color: '#a855f7' };
+                    case 'severe': return { label: 'Severe flooding (Level 3)', color: '#ef4444' };
+                    case 'moderate': return { label: 'Moderate flooding (Level 2)', color: '#f97316' };
+                    case 'slight': return { label: 'Slight flooding (Level 1)', color: '#eab308' };
+                    case 'safe':
+                    default: return { label: 'Safe', color: '#22c55e' };
+                  }
+                };
+                const warningInfo = getWarningStatusInfo(device.warning_water_status, currentPct, systemConfig);
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>Water Level percentage</span>
-                  <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
-                    {(((device.current_water_level || 0) / (device.calib_empty_cm || 100)) * 100).toFixed(1)} %
-                  </span>
-                </div>
-                
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>Sleep Interval</span>
-                  <span style={{ color: 'var(--text-primary)' }}>{device.sleep_interval_minutes || 1} min</span>
-                </div>
-              </div>
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Status</span>
+                      <span style={{ color: device.status === 'Online' ? 'var(--green-400)' : 'var(--red-400)', fontWeight: 600 }}>{device.status}</span>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Calibration (Empty)</span>
+                      <span style={{ color: 'var(--text-primary)' }}>{device.calib_empty_cm || 100} cm</span>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Water Level percentage</span>
+                      <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+                        {currentPct.toFixed(1)} %
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Flood level</span>
+                      <span style={{ color: warningInfo.color, fontWeight: 700 }}>{warningInfo.label}</span>
+                    </div>
+                    
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Sleep Interval</span>
+                      <span style={{ color: 'var(--text-primary)' }}>{device.sleep_interval_minutes || 1} min</span>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '10px', paddingTop: '10px', borderTop: '1px dashed var(--border-subtle)' }}>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>Warning thresholds (Admin):</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontSize: '0.75rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                          <span>Level 1 (Slight):</span>
+                          <span style={{ color: '#eab308', fontWeight: 600 }}>&ge; {systemConfig?.water_level_l1 ?? 20}%</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                          <span>Level 2 (Moderate):</span>
+                          <span style={{ color: '#f97316', fontWeight: 600 }}>&ge; {systemConfig?.water_level_l2 ?? 40}%</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                          <span>Level 3 (Severe):</span>
+                          <span style={{ color: '#ef4444', fontWeight: 600 }}>&ge; {systemConfig?.water_level_l3 ?? 50}%</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                          <span>Level 4 (Critical):</span>
+                          <span style={{ color: '#a855f7', fontWeight: 600 }}>&ge; {systemConfig?.water_level_l4 ?? 60}%</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Footer info */}

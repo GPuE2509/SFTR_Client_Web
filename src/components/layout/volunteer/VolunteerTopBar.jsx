@@ -69,14 +69,14 @@ export default function VolunteerTopBar({ activePage, collapsed, onLogout, userN
           }}>
             {pageInfo.title}
           </div>
-          <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div className="topbar-subtitle" style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {pageInfo.sub}
           </div>
         </div>
 
         {/* SOS Alert Badge */}
         {sosCount > 0 && (
-          <div style={{
+          <div className="topbar-badge" style={{
             display: 'flex', alignItems: 'center', gap: 6,
             padding: '5px 12px',
             background: 'rgba(239,29,55,0.12)',
@@ -92,7 +92,7 @@ export default function VolunteerTopBar({ activePage, collapsed, onLogout, userN
           </div>
         )}
 
-        <div style={{
+        <div className="topbar-clock" style={{
           display: 'flex', alignItems: 'center', gap: 12,
           padding: '5px 14px',
           background: 'rgba(61,125,176,0.08)',
@@ -112,7 +112,7 @@ export default function VolunteerTopBar({ activePage, collapsed, onLogout, userN
           </div>
         </div>
 
-        <div style={{
+        <div className="topbar-wifi" style={{
           display: 'flex', alignItems: 'center', gap: 6,
           padding: '5px 12px',
           background: 'rgba(62,169,123,0.08)',
@@ -147,7 +147,7 @@ export default function VolunteerTopBar({ activePage, collapsed, onLogout, userN
             <div className="user-avatar" style={{ background: 'linear-gradient(135deg, #dc2626, #ef4444)', ...avatarStyle }}>
               {avatarUrl ? '' : avatarInitial}
             </div>
-            <div>
+            <div className="topbar-user-info">
               <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap', fontFamily: 'var(--font-display)' }}>
                 {userName || 'Volunteer'}
               </div>

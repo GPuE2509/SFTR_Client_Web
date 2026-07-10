@@ -3,10 +3,12 @@ import {
   Bell, CheckCircle, MessageSquare, Search, Send, Clock,
   Mail, Smartphone, ShieldCheck, Settings, Circle, Check,
   Image as ImageIcon, Smile, Phone, Video, MoreHorizontal,
-  AlertTriangle, Zap, Users, ChevronRight, X, UserPlus, UserCheck, Loader
+  AlertTriangle, Zap, Users, ChevronRight, X, UserPlus, UserCheck, Loader,
+  ThumbsUp, MessageCircle, CornerDownRight, CheckSquare
 } from 'lucide-react';
 import { broadcastAdvisories } from '../../data/mockData';
 import { apiService } from '../../services/apiService';
+import { useNavigate } from 'react-router-dom';
 
 // ── Mock Data ────────────────────────────────────────────────────────────────
 
@@ -38,6 +40,11 @@ const notifTypeConfig = {
   warning: { color: 'var(--orange-400)', bg: 'rgba(249,115,22,0.06)', icon: AlertTriangle, label: "Warning" },
   info: { color: 'var(--cyan-400)', bg: 'rgba(6,182,212,0.06)', icon: Bell, label: "Information" },
   chat: { color: 'var(--cyan-400)', bg: 'rgba(6,182,212,0.08)', icon: MessageSquare, label: "Message" },
+  // Forum notification types
+  forum_comment:  { color: '#818cf8', bg: 'rgba(129,140,248,0.08)', icon: MessageCircle,    label: 'Comment' },
+  forum_reply:    { color: '#a78bfa', bg: 'rgba(167,139,250,0.08)', icon: CornerDownRight,   label: 'Reply' },
+  forum_reaction: { color: '#fb7185', bg: 'rgba(251,113,133,0.08)', icon: ThumbsUp,          label: 'Reaction' },
+  forum_approved: { color: '#34d399', bg: 'rgba(52,211,153,0.08)',  icon: CheckSquare,       label: 'Approved' },
 };
 
 // ── Avatar Helpers ───────────────────────────────────────────────────────────
@@ -130,8 +137,122 @@ const renderConvAvatar = (conv, size = 40) => {
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function UserNotifications() {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('notifications');
-  const [notifications, setNotifications] = useState(initialNotifications);
+  const [notifications, setNotifications] = useState([]);
+  const [isLoadingNotifications, setIsLoadingNotifications] = useState(false);
+
+  const fetchNotifications = async () => {
+    setIsLoadingNotifications(true);
+    try {
+      const res = await apiService.get('/notifications');
+      if (res && res.success && res.data) {
+        const mapped = res.data.map(n => ({
+          id: n._id || n.id,
+          title: n.title || 'Notification',
+          body: n.body || '',
+          time: n.created_at ? new Date(n.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) + ' ' + new Date(n.created_at).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '',
+          type: mapNotificationType(n.type),
+          read: n.is_read || false,
+          metadata: n.metadata,
+          reference_type: n.reference_type,
+          reference_id: n.reference_id
+        }));
+        setNotifications(mapped);
+      }
+    } catch (err) {
+      console.error('Failed to load notifications from backend:', err);
+    } finally {
+      setIsLoadingNotifications(false);
+    }
+  };
+
+  const fetchPreferences = async () => {
+    try {
+      const res = await apiService.get('/notifications/preferences');
+      if (res && res.success && res.data) {
+        setPreferences(res.data);
+      }
+    } catch (err) {
+      console.error('Failed to load preferences from backend:', err);
+    }
+  };
+
+  const handleTogglePreference = async (key, val) => {
+    const updated = { ...preferences, [key]: val };
+    setPreferences(updated);
+    try {
+      await apiService.put('/notifications/preferences', updated);
+    } catch (err) {
+      console.error('Failed to update preference:', err);
+    }
+  };
+
+  const mapNotificationType = (backendType) => {
+    switch (backendType) {
+      case 'Emergency_SOS_Nearby':
+        return 'sos';
+      case 'Flood_In_Warning_Zone':
+        return 'critical';
+      case 'Admin_Announcement':
+      case 'System_Alert':
+        return 'warning';
+      case 'New_Comment_On_Post':
+        return 'forum_comment';
+      case 'New_Reply_On_Comment':
+        return 'forum_reply';
+      case 'New_Reaction_On_Post':
+        return 'forum_reaction';
+      case 'Post_Approved':
+        return 'forum_approved';
+      default:
+        return 'info';
+    }
+  };
+
+  const handleNotificationClick = async (n) => {
+    if (!n.read) {
+      await markRead(n.id);
+    }
+
+    // 1. Route Volunteer / Workshop registrations
+    if (n.title?.includes('Registration Request') && n.reference_id) {
+      navigate(`/users?tab=approvals&requestId=${n.reference_id}`);
+      return;
+    }
+
+    // 2. Route Incident Reports (distinguishing manager/admin dashboard from user verification list)
+    if (n.reference_type === 'incident_reports') {
+      const isManager = window.location.pathname.includes('manager') || window.location.pathname.includes('admin') || localStorage.getItem('user_role') === 'Manager' || localStorage.getItem('user_role') === 'Admin';
+      if (isManager) {
+        navigate('/reports', { state: { reportId: n.reference_id } });
+      } else {
+        navigate('/reports', { state: { tab: 'my', reportId: n.reference_id } });
+      }
+      return;
+    }
+
+    const targetUrl = n.metadata?.web_url;
+    if (targetUrl) {
+      if (targetUrl.startsWith('http://') || targetUrl.startsWith('https://')) {
+        window.open(targetUrl, '_blank');
+      } else {
+        navigate(targetUrl);
+      }
+      return;
+    }
+
+    if (n.reference_type === 'forum_posts' || n.reference_type === 'post_comments') {
+      navigate('/forum');
+    } else if (n.reference_type === 'incident_reports') {
+      navigate('/reports', { state: { tab: 'my', reportId: n.reference_id } });
+    } else if (n.reference_type === 'rescue_sessions') {
+      navigate(window.location.pathname.includes('volunteer') ? '/tasks' : '/sos');
+    } else if (n.reference_type === 'workshop_reviews') {
+      navigate('/reviews');
+    }
+  };
+
   const [searchChat, setSearchChat] = useState('');
   const [searchPeople, setSearchPeople] = useState('');
   const [chatSidebarMode, setChatSidebarMode] = useState('convs'); // 'convs' | 'find'
@@ -146,7 +267,6 @@ export default function UserNotifications() {
     community: true,
     pushChannel: true,
     emailChannel: false,
-    smsChannel: false,
   });
   const messagesEndRef = useRef(null);
 
@@ -167,6 +287,11 @@ export default function UserNotifications() {
   }, [toast]);
 
   const unreadCount = notifications.filter(n => !n.read).length;
+
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('unread-count-changed', { detail: { count: unreadCount } }));
+    localStorage.setItem('total_unread_count', unreadCount.toString());
+  }, [unreadCount]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -190,6 +315,13 @@ export default function UserNotifications() {
     };
     loadProfile();
   }, []);
+
+  useEffect(() => {
+    if (currentUser) {
+      fetchNotifications();
+      fetchPreferences();
+    }
+  }, [currentUser]);
 
   // Load conversation list once currentUser is loaded
   useEffect(() => {
@@ -280,6 +412,46 @@ export default function UserNotifications() {
     socket.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
+
+        // ── Real-time in-app notification pushed from server ──
+        if (msg.type === 'notification' && msg.notification) {
+          const n = msg.notification;
+          const mappedType = mapNotificationType(n.type);
+          const newNotif = {
+            id: n._id || `ws-notif-${Date.now()}`,
+            title: n.title || 'Thông báo',
+            body: n.body || '',
+            time: n.created_at
+              ? new Date(n.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) +
+                ' ' + new Date(n.created_at).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })
+              : new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+            type: mappedType,
+            read: false,
+            metadata: n.metadata,
+            reference_type: n.reference_type,
+            reference_id: n.reference_id
+          };
+
+          // Prepend to list (avoid duplicates)
+          setNotifications(prev => {
+            if (prev.some(x => x.id === newNotif.id)) return prev;
+            return [newNotif, ...prev];
+          });
+
+          // Show a transient toast for forum-type notifications
+          const forumTypes = ['forum_comment', 'forum_reply', 'forum_reaction', 'forum_approved'];
+          if (forumTypes.includes(mappedType)) {
+            setToast({
+              id: `notif-toast-${Date.now()}`,
+              title: n.title,
+              body: n.body,
+              isNotification: true,
+              webUrl: n.metadata?.web_url || '/forum',
+            });
+          }
+          return;
+        }
+
         if (msg.type === 'chat') {
           const threadId = msg.groupId || msg.senderId;
           const isViewingThisChat = activeTabRef.current === 'chat' && threadId === activeConvRef.current?.id;
@@ -379,8 +551,27 @@ export default function UserNotifications() {
     return () => clearTimeout(delayDebounceFn);
   }, [searchPeople]);
 
-  const markRead = (id) => setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
-  const markAll = () => setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+  const markRead = async (id) => {
+    if (String(id).startsWith('chat-')) {
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+      return;
+    }
+    try {
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+      await apiService.patch(`/notifications/${id}/read`);
+    } catch (err) {
+      console.error('Failed to mark notification as read:', err);
+    }
+  };
+
+  const markAll = async () => {
+    try {
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+      await apiService.post('/notifications/read-all');
+    } catch (err) {
+      console.error('Failed to mark all notifications as read:', err);
+    }
+  };
 
   const sendMessage = () => {
     if (!inputText.trim() || !activeConv) return;
@@ -582,22 +773,29 @@ export default function UserNotifications() {
           </div>
 
           <div style={{ overflowY: 'auto', flex: 1, padding: '12px 16px', display: 'grid', gap: 10, alignContent: 'start' }}>
-            {notifications.map(n => {
-              const cfg = notifTypeConfig[n.type] || notifTypeConfig.info;
-              const Icon = cfg.icon;
-              return (
-                <div
-                  key={n.id}
-                  style={{
-                    padding: '14px 16px',
-                    borderRadius: 'var(--r-md)',
-                    border: `1px solid ${n.read ? 'var(--border-dim)' : cfg.color + '55'}`,
-                    background: n.read ? 'transparent' : cfg.bg,
-                    opacity: n.read ? 0.65 : 1,
-                    display: 'flex', alignItems: 'flex-start', gap: 12,
-                    transition: 'all 0.2s',
-                  }}
-                >
+            {notifications.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                No notifications yet.
+              </div>
+            ) : (
+              notifications.map(n => {
+                const cfg = notifTypeConfig[n.type] || notifTypeConfig.info;
+                const Icon = cfg.icon;
+                return (
+                  <div
+                    key={n.id}
+                    onClick={() => handleNotificationClick(n)}
+                    style={{
+                      padding: '14px 16px',
+                      borderRadius: 'var(--r-md)',
+                      border: `1px solid ${n.read ? 'var(--border-dim)' : cfg.color + '55'}`,
+                      background: n.read ? 'transparent' : cfg.bg,
+                      opacity: n.read ? 0.65 : 1,
+                      display: 'flex', alignItems: 'flex-start', gap: 12,
+                      transition: 'all 0.2s',
+                      cursor: 'pointer'
+                    }}
+                  >
                   <div style={{ width: 32, height: 32, borderRadius: '50%', background: cfg.bg, border: `1px solid ${cfg.color}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 2 }}>
                     <Icon size={14} color={cfg.color} />
                   </div>
@@ -619,7 +817,8 @@ export default function UserNotifications() {
                   )}
                 </div>
               );
-            })}
+            })
+          )}
           </div>
         </div>
       )}
@@ -958,7 +1157,7 @@ export default function UserNotifications() {
                 <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Master switch — full on/off</div>
               </div>
               <label className="toggle">
-                <input type="checkbox" checked={preferences.masterPush} onChange={() => setPreferences(p => ({ ...p, masterPush: !p.masterPush }))} />
+                <input type="checkbox" checked={preferences.masterPush} onChange={() => handleTogglePreference('masterPush', !preferences.masterPush)} />
                 <span className="toggle-slider" />
               </label>
             </div>
@@ -966,7 +1165,6 @@ export default function UserNotifications() {
             {[
               { key: 'pushChannel', label: "Push notifications (Push)", icon: Smartphone, desc: "Receive instant push notifications" },
               { key: 'emailChannel', label: 'Email', icon: Mail, desc: "Receive via email" },
-              { key: 'smsChannel', label: 'SMS', icon: Phone, desc: "Receive phone messages" },
             ].map(row => {
               const Icon = row.icon;
               return (
@@ -979,7 +1177,7 @@ export default function UserNotifications() {
                     </div>
                   </div>
                   <label className="toggle">
-                    <input type="checkbox" checked={preferences[row.key]} onChange={() => setPreferences(p => ({ ...p, [row.key]: !p[row.key] }))} disabled={!preferences.masterPush} />
+                    <input type="checkbox" checked={preferences[row.key]} onChange={() => handleTogglePreference(row.key, !preferences[row.key])} disabled={!preferences.masterPush} />
                     <span className="toggle-slider" />
                   </label>
                 </div>
@@ -992,11 +1190,30 @@ export default function UserNotifications() {
             <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <ShieldCheck size={14} color="var(--cyan-400)" /> Warning type
             </div>
-            {[
-              { key: 'flood', label: "Flooding & warnings", desc: "Notification when there is a flooding event in the area", icon: AlertTriangle, color: 'var(--cyan-400)' },
-              { key: 'sos', label: "SOS & Rescue", desc: "Status of your rescue request", icon: Zap, color: 'var(--orange-400)' },
-              { key: 'community', label: "Community & Forum", desc: "Comment, like and respond to posts", icon: Users, color: 'var(--green-400)' },
-            ].map(row => {
+            {(() => {
+              const getUserRole = () => {
+                try {
+                  const token = sessionStorage.getItem('auth_token') || localStorage.getItem('auth_token');
+                  if (token) {
+                    const payload = JSON.parse(atob(token.split('.')[1]));
+                    return payload.role || payload.roles?.[0] || 'User';
+                  }
+                } catch (e) {}
+                return localStorage.getItem('user_role') || 'User';
+              };
+              const userRole = getUserRole();
+              const isAdminOrManager = userRole === 'Admin' || userRole === 'Manager';
+              const preferenceOptions = isAdminOrManager ? [
+                { key: 'flood', label: "IoT Telemetry & Hardware warnings", desc: "IoT low battery warnings and automated sensor alerts", icon: AlertTriangle, color: 'var(--cyan-400)' },
+                { key: 'sos', label: "SOS Monitoring & Emergencies", desc: "Real-time citizen SOS alerts and rescue session updates", icon: Zap, color: 'var(--orange-400)' },
+                { key: 'community', label: "Approvals & Moderation Requests", desc: "Registration requests (Volunteers, Workshops) and Community report flags", icon: Users, color: 'var(--green-400)' },
+              ] : [
+                { key: 'flood', label: "Flooding & warnings", desc: "Notification when there is a flooding event in the area", icon: AlertTriangle, color: 'var(--cyan-400)' },
+                { key: 'sos', label: "SOS & Rescue", desc: "Status of your rescue request", icon: Zap, color: 'var(--orange-400)' },
+                { key: 'community', label: "Community & Forum", desc: "Comment, like and respond to posts", icon: Users, color: 'var(--green-400)' },
+              ];
+              return preferenceOptions;
+            })().map(row => {
               const Icon = row.icon;
               return (
                 <div key={row.key} style={{ padding: '12px 14px', borderRadius: 'var(--r-sm)', border: `1px solid ${preferences[row.key] ? row.color + '44' : 'var(--border-dim)'}`, background: preferences[row.key] ? row.color + '08' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'space-between', transition: 'all 0.2s', opacity: preferences.masterPush ? 1 : 0.4 }}>
@@ -1010,7 +1227,7 @@ export default function UserNotifications() {
                     </div>
                   </div>
                   <label className="toggle">
-                    <input type="checkbox" checked={preferences[row.key]} onChange={() => setPreferences(p => ({ ...p, [row.key]: !p[row.key] }))} disabled={!preferences.masterPush} />
+                    <input type="checkbox" checked={preferences[row.key]} onChange={() => handleTogglePreference(row.key, !preferences[row.key])} disabled={!preferences.masterPush} />
                     <span className="toggle-slider" />
                   </label>
                 </div>
@@ -1051,11 +1268,15 @@ export default function UserNotifications() {
           `}</style>
           <div style={{
             width: 32, height: 32, borderRadius: '50%',
-            background: 'rgba(69, 179, 192, 0.1)',
-            border: '1px solid rgba(69, 179, 192, 0.2)',
+            background: toast.isNotification ? 'rgba(245, 158, 11, 0.1)' : 'rgba(69, 179, 192, 0.1)',
+            border: toast.isNotification ? '1px solid rgba(245, 158, 11, 0.2)' : '1px solid rgba(69, 179, 192, 0.2)',
             display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
           }}>
-            <MessageSquare size={14} color="var(--cyan-400)" />
+            {toast.isNotification ? (
+              <Bell size={14} color="#f59e0b" />
+            ) : (
+              <MessageSquare size={14} color="var(--cyan-400)" />
+            )}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--text-primary)', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -1069,29 +1290,36 @@ export default function UserNotifications() {
                 className="btn btn-primary btn-sm"
                 style={{ padding: '2px 8px', fontSize: '0.68rem', height: 22 }}
                 onClick={() => {
-                  setActiveTab('chat');
-                  const targetConv = convList.find(c => c.id === toast.senderId);
-                  if (targetConv) {
-                    setActiveConv(targetConv);
+                  if (toast.isNotification) {
+                    setToast(null);
+                    if (toast.webUrl) {
+                      navigate(toast.webUrl);
+                    }
                   } else {
-                    const newConv = {
-                      id: toast.senderId,
-                      name: toast.senderName,
-                      role: toast.senderRole || 'Member',
-                      avatar: toast.senderName.substring(0, 2).toUpperCase(),
-                      color: 'var(--cyan-400)',
-                      lastMsg: toast.body,
-                      time: 'Just now',
-                      unread: 0,
-                      online: true
-                    };
-                    setConvList(prev => [newConv, ...prev]);
-                    setActiveConv(newConv);
+                    setActiveTab('chat');
+                    const targetConv = convList.find(c => c.id === toast.senderId);
+                    if (targetConv) {
+                      setActiveConv(targetConv);
+                    } else {
+                      const newConv = {
+                        id: toast.senderId,
+                        name: toast.senderName,
+                        role: toast.senderRole || 'Member',
+                        avatar: toast.senderName ? toast.senderName.substring(0, 2).toUpperCase() : 'U',
+                        color: 'var(--cyan-400)',
+                        lastMsg: toast.body,
+                        time: 'Just now',
+                        unread: 0,
+                        online: true
+                      };
+                      setConvList(prev => [newConv, ...prev]);
+                      setActiveConv(newConv);
+                    }
+                    setToast(null);
                   }
-                  setToast(null);
                 }}
               >
-                Reply
+                {toast.isNotification ? 'View' : 'Reply'}
               </button>
               <button
                 className="btn btn-ghost btn-sm"

@@ -3,14 +3,14 @@
 // =====================================================
 
 export const iotDevices = [
-  { id: 'IOT-QU12-001', name: "Trạm Quan Trắc Ninh Kiều", location: "Bến Ninh Kiều", district: "Ninh Kiều", type: 'water_level', status: 'active', battery: 87, signal: 95, lastReading: '14:39', waterLevel: 42, tempC: 31 },
-  { id: 'IOT-HM-047', name: "Trạm Quan Trắc Cái Răng", location: "Chợ nổi Cái Răng", district: "Cái Răng", type: 'water_level', status: 'warning', battery: 23, signal: 72, lastReading: '14:35', waterLevel: 91, tempC: 30 },
-  { id: 'IOT-BC-023', name: "Trạm Quan Trắc Bình Thủy", location: "Rạch Bình Thủy", district: "Bình Thủy", type: 'rainfall', status: 'active', battery: 91, signal: 88, lastReading: '14:40', waterLevel: 18, tempC: 29 },
-  { id: 'IOT-TD-012', name: "Trạm Quan Trắc Phong Điền", location: "Chợ Phong Điền", district: "Phong Điền", type: 'water_level', status: 'error', battery: 0, signal: 0, lastReading: '09:12', waterLevel: 0, tempC: 0 },
-  { id: 'IOT-GV-089', name: "Trạm Quan Trắc Ô Môn", location: "Quốc lộ 91", district: "Ô Môn", type: 'combined', status: 'active', battery: 76, signal: 91, lastReading: '14:38', waterLevel: 55, tempC: 32 },
-  { id: 'IOT-BT-034', name: "Trạm Quan Trắc Thốt Nốt", location: "Kênh Thốt Nốt", district: "Thốt Nốt", type: 'water_level', status: 'warning', battery: 45, signal: 61, lastReading: '14:30', waterLevel: 78, tempC: 31 },
-  { id: 'IOT-QU7-056', name: "Trạm Quan Trắc Cờ Đỏ", location: "Thị trấn Cờ Đỏ", district: "Cờ Đỏ", type: 'rainfall', status: 'active', battery: 98, signal: 99, lastReading: '14:40', waterLevel: 12, tempC: 30 },
-  { id: 'IOT-QU1-003', name: "Trạm Quan Trắc Vĩnh Thạnh", location: "Thị trấn Vĩnh Thạnh", district: "Vĩnh Thạnh", type: 'water_level', status: 'offline', battery: 12, signal: 0, lastReading: '11:23', waterLevel: 0, tempC: 0 },
+  { id: 'IOT-QU12-001', name: "Ninh Kieu Monitoring Station", location: "Ninh Kieu Wharf", district: "Ninh Kieu", type: 'water_level', status: 'active', battery: 87, signal: 95, lastReading: '14:39', waterLevel: 42, tempC: 31 },
+  { id: 'IOT-HM-047', name: "Cai Rang Monitoring Station", location: "Cai Rang Floating Market", district: "Cai Rang", type: 'water_level', status: 'warning', battery: 23, signal: 72, lastReading: '14:35', waterLevel: 91, tempC: 30 },
+  { id: 'IOT-BC-023', name: "Binh Thuy Monitoring Station", location: "Binh Thuy Canal", district: "Binh Thuy", type: 'rainfall', status: 'active', battery: 91, signal: 88, lastReading: '14:40', waterLevel: 18, tempC: 29 },
+  { id: 'IOT-TD-012', name: "Phong Dien Monitoring Station", location: "Phong Dien Market", district: "Phong Dien", type: 'water_level', status: 'error', battery: 0, signal: 0, lastReading: '09:12', waterLevel: 0, tempC: 0 },
+  { id: 'IOT-GV-089', name: "O Mon Monitoring Station", location: "National Route 91", district: "O Mon", type: 'combined', status: 'active', battery: 76, signal: 91, lastReading: '14:38', waterLevel: 55, tempC: 32 },
+  { id: 'IOT-BT-034', name: "Thot Not Monitoring Station", location: "Thot Not Canal", district: "Thot Not", type: 'water_level', status: 'warning', battery: 45, signal: 61, lastReading: '14:30', waterLevel: 78, tempC: 31 },
+  { id: 'IOT-QU7-056', name: "Co Do Monitoring Station", location: "Co Do Town", district: "Co Do", type: 'rainfall', status: 'active', battery: 98, signal: 99, lastReading: '14:40', waterLevel: 12, tempC: 30 },
+  { id: 'IOT-QU1-003', name: "Vinh Thanh Monitoring Station", location: "Vinh Thanh Town", district: "Vinh Thanh", type: 'water_level', status: 'offline', battery: 12, signal: 0, lastReading: '11:23', waterLevel: 0, tempC: 0 },
 ];
 export const mockDevices = iotDevices;
 

@@ -6,7 +6,7 @@ import {
   Store, ClipboardList, Star, BarChart2, Users,
 } from 'lucide-react';
 
-export default function UserSidebar({ activePage, onNavigate, collapsed, onToggleCollapse, role = 'user', mobileOpen = false, onMobileClose }) {
+export default function UserSidebar({ activePage, onNavigate, collapsed, onToggleCollapse, role = 'user', mobileOpen = false, onMobileClose, activeSOSCount = 0 }) {
   const isWorkshop = role === 'workshop';
   const isWorkshopRole = isWorkshop;
 
@@ -21,7 +21,7 @@ export default function UserSidebar({ activePage, onNavigate, collapsed, onToggl
     const checkNew = async () => {
       const lastSeen = localStorage.getItem('lastVisitedCommunityVerification');
       try {
-        const res = await fetch(`https://sftr-api.onrender.com/api/incident-reports/new-count${lastSeen ? `?since=${lastSeen}` : ''}`);
+        const res = await fetch(`http://localhost:5000/api/incident-reports/new-count${lastSeen ? `?since=${lastSeen}` : ''}`);
         const data = await res.json();
         if (data.success) setNewReportsCount(data.count);
       } catch (err) {
@@ -59,7 +59,7 @@ export default function UserSidebar({ activePage, onNavigate, collapsed, onToggl
       section: "REPORT & RESCUE",
       items: [
         { id: 'user-reports', label: "Community reporting", icon: FileText, badge: newReportsCount > 0 ? newReportsCount : null },
-        { id: 'user-sos', label: "SOS & Rescue", icon: ShieldAlert, badge: 1 },
+        { id: 'user-sos', label: "SOS & Rescue", icon: ShieldAlert, badge: activeSOSCount > 0 ? activeSOSCount : null },
       ],
     },
   ];

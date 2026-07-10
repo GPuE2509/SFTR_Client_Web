@@ -28,7 +28,6 @@ const navItems = [
     section: "COMMUNITY",
     items: [
       { id: 'forum-moderation',  label: "Forum Moderation", icon: MessageSquare, badge: 5 },
-      { id: 'comment-moderation', label: "Moderation Comments", icon: MessageSquare, badge: null },
       { id: 'points-management', label: "Score Management", icon: Trophy, badge: null },
       { id: 'support-analytics', label: "Support & Analysis",  icon: HeadphonesIcon, badge: 3 },
     ],
@@ -51,7 +50,7 @@ export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCol
   const [pendingReports, setPendingReports] = useState(0);
 
   useEffect(() => {
-    fetch('https://sftr-api.onrender.com/api/incident-reports')
+    fetch('http://localhost:5000/api/incident-reports')
       .then(res => res.json())
       .then(data => {
         if (data.success) {

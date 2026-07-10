@@ -45,12 +45,12 @@ export default function GuestTopBar({ activePage, collapsed, onOpenProfile }) {
           }}>
             {pageInfo.title}
           </div>
-          <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div className="topbar-subtitle" style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {pageInfo.sub}
           </div>
         </div>
 
-        <div style={{
+        <div className="topbar-clock" style={{
           display: 'flex', alignItems: 'center', gap: 12,
           padding: '5px 14px',
           background: 'rgba(61,125,176,0.08)',
@@ -70,7 +70,7 @@ export default function GuestTopBar({ activePage, collapsed, onOpenProfile }) {
           </div>
         </div>
 
-        <div style={{
+        <div className="topbar-wifi" style={{
           display: 'flex', alignItems: 'center', gap: 6,
           padding: '5px 12px',
           background: 'rgba(62,169,123,0.08)',

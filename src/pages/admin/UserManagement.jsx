@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   Search, Filter, Lock, Unlock, Eye, Cpu, Battery,
   Wifi, AlertTriangle, CheckCircle, X, PowerOff,
@@ -7,21 +8,14 @@ import {
 } from 'lucide-react';
 import { users } from '../../data/mockData';
 import { apiService } from '../../services/apiService';
+import { useAuth } from '../../hooks/useAuth';
 
 function FloodWarningBadge({ level, config, calib_empty_cm }) {
   const current = level || 0;
-  const calib = calib_empty_cm || 100;
-  const pct = (current / calib) * 100;
-  const l1 = config?.water_level_l1 ?? 20;
-  const l2 = config?.water_level_l2 ?? 40;
-  const l3 = config?.water_level_l3 ?? 50;
-  const l4 = config?.water_level_l4 ?? 60;
-  
-  if (pct >= l4) return <span className="badge" style={{ background: 'rgba(168,85,247,0.15)', color: 'var(--purple-400)', border: '1px solid rgba(168,85,247,0.3)' }}><span style={{ width: 6, height: 6, background: 'var(--purple-400)', borderRadius: '50%', display: 'inline-block' }} /> Critical Flooding</span>;
-  if (pct >= l3) return <span className="badge badge-red"><span style={{ width: 6, height: 6, background: 'var(--red-400)', borderRadius: '50%', display: 'inline-block' }} /> Severe Flooding</span>;
-  if (pct >= l2) return <span className="badge badge-orange"><span style={{ width: 6, height: 6, background: 'var(--orange-400)', borderRadius: '50%', display: 'inline-block' }} /> Moderate Flooding</span>;
-  if (pct >= l1) return <span className="badge badge-gold"><span style={{ width: 6, height: 6, background: 'var(--gold-400)', borderRadius: '50%', display: 'inline-block' }} /> Slight Flooding</span>;
-  return <span className="badge badge-green"><span style={{ width: 6, height: 6, background: 'var(--green-400)', borderRadius: '50%', display: 'inline-block' }} /> Safe</span>;
+  if (current > 5) {
+    return <span className="badge badge-green"><span style={{ width: 6, height: 6, background: 'var(--green-400)', borderRadius: '50%', display: 'inline-block' }} /> {Math.round(current * 10) / 10} cm</span>;
+  }
+  return <span className="badge badge-gray" style={{ color: 'var(--text-muted)' }}><span style={{ width: 6, height: 6, background: '#64748b', borderRadius: '50%', display: 'inline-block' }} /> No water</span>;
 }
 
 function ConfirmModal({ title, message, onConfirm, onCancel, variant = 'danger' }) {
@@ -229,6 +223,8 @@ function RoleRequestDetailModal({ request, onClose, onAction, loading }) {
 }
 
 export default function UserManagement({ onApproveRequest, onRejectRequest }) {
+  const { role: currentUserRole } = useAuth();
+  const location = useLocation();
   const [activeTab, setActiveTab] = useState('users');
   const [userList, setUserList] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -244,6 +240,31 @@ export default function UserManagement({ onApproveRequest, onRejectRequest }) {
   const [page, setPage] = useState(1);
   const pageSize = 6;
   const [systemConfig, setSystemConfig] = useState(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const tab = params.get('tab');
+    const requestId = params.get('requestId');
+    if (tab) {
+      setActiveTab(tab);
+    }
+    if (requestId && roleRequests.length > 0) {
+      const match = roleRequests.find(r => r.id === requestId || r._id === requestId);
+      if (match) {
+        setDetailRequestModal(match);
+        setTimeout(() => {
+          const element = document.getElementById(`request-row-${requestId}`);
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            element.style.boxShadow = '0 0 15px var(--cyan-400)';
+            setTimeout(() => {
+              element.style.boxShadow = '';
+            }, 3000);
+          }
+        }, 500);
+      }
+    }
+  }, [location.search, roleRequests]);
 
   useEffect(() => {
     const fetchConfig = async () => {
@@ -529,21 +550,23 @@ export default function UserManagement({ onApproveRequest, onRejectRequest }) {
                             >
                               {u.status === 'active' ? <><Lock size={12} /> Lock</> : <><Unlock size={12} /> Open</>}
                             </button>
-                            <button
-                              className="btn btn-ghost btn-sm"
-                              onClick={() => setRoleModal(u)}
-                              disabled={!['user', 'manager'].includes(u.role)}
-                              style={{
-                                padding: '4px 10px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 4,
-                                opacity: !['user', 'manager'].includes(u.role) ? 0.4 : 1,
-                                cursor: !['user', 'manager'].includes(u.role) ? 'not-allowed' : 'pointer'
-                              }}
-                            >
-                              <Shield size={12} /> Role
-                            </button>
+                            {currentUserRole !== 'manager' && (
+                              <button
+                                className="btn btn-ghost btn-sm"
+                                onClick={() => setRoleModal(u)}
+                                disabled={!['user', 'manager'].includes(u.role)}
+                                style={{
+                                  padding: '4px 10px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  opacity: !['user', 'manager'].includes(u.role) ? 0.4 : 1,
+                                  cursor: !['user', 'manager'].includes(u.role) ? 'not-allowed' : 'pointer'
+                                }}
+                              >
+                                <Shield size={12} /> Role
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -668,7 +691,7 @@ export default function UserManagement({ onApproveRequest, onRejectRequest }) {
             </thead>
             <tbody>
               {roleRequests.map((req) => (
-                <tr key={req.id}>
+                <tr id={`request-row-${req.id || req._id}`} key={req.id}>
                   <td>
                     <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{req.userName}</div>
                   </td>
