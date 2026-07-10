@@ -345,7 +345,7 @@ export default function VolunteerNotifications() {
   useEffect(() => {
     if (!currentUser) return;
 
-    const wsUrl = `ws://localhost:5000`;
+    const wsUrl = import.meta.env.VITE_WS_URL || `ws://localhost:5000`;
     const socket = new WebSocket(wsUrl);
     wsRef.current = socket;
 

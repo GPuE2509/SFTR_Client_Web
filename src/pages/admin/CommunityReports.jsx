@@ -321,7 +321,7 @@ export default function CommunityReports() {
 
   const fetchReports = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/incident-reports');
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/incident-reports`);
       const data = await res.json();
       if (data.success) {
         const mappedData = data.data.map(r => ({ 
@@ -371,7 +371,7 @@ export default function CommunityReports() {
       return;
     }
     try {
-      const res = await fetch(`http://localhost:5000/api/incident-reports/${id}/status`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/incident-reports/${id}/status`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: action }),

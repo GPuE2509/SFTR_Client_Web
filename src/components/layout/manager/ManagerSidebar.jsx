@@ -45,7 +45,7 @@ export default function ManagerSidebar({ activePage, onNavigate, collapsed, onTo
   const [pendingReports, setPendingReports] = useState(0);
 
   useEffect(() => {
-    fetch('http://localhost:5000/api/incident-reports')
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/incident-reports`)
       .then(res => res.json())
       .then(data => {
         if (data.success) {
